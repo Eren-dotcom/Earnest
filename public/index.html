@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Earnest — an accountability layer for AI coding agents. Verified task scores, project trust, and repair before new work." />
+    <title>Earnest — accountability for AI coding agents</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to main content</a>
+
+    <header class="site-header">
+      <div class="site-header__inner">
+        <div class="brand">
+          <span class="brand__mark" aria-hidden="true">E</span>
+          <div>
+            <h1 class="brand__name">Earnest</h1>
+            <p class="brand__tagline">Trust is earned. Mistakes must be fixed first.</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <p id="demo-notice" class="demo-notice">
+            Simulated agent. Every edit happens in a disposable copy of a sample
+            project, never in your files.
+          </p>
+          <button type="button" class="btn btn--ghost" id="reset-btn">Reset demo</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="status-region">
+      <p id="live-region" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></p>
+      <p id="alert-region" class="visually-hidden" role="alert" aria-live="assertive" aria-atomic="true"></p>
+    </div>
+
+    <main id="main" class="layout">
+      <!-- LEFT: trust, permissions, contract -->
+      <section class="column" aria-labelledby="trust-heading">
+        <h2 id="trust-heading" class="section-heading">Trust and permissions</h2>
+
+        <div class="card trust-card">
+          <div class="trust-card__head">
+            <div>
+              <p class="metric-label">Project trust level</p>
+              <p class="trust-value">
+                <span id="trust-number">5</span><span class="trust-denominator">/10</span>
+              </p>
+            </div>
+            <p class="pill" id="tier-pill">Limited scope</p>
+          </div>
+
+          <div
+            class="meter"
+            role="img"
+            id="trust-meter"
+            aria-label="Project trust level 5 out of 10"
+          >
+            <div class="meter__track" aria-hidden="true">
+              <div class="meter__fill" id="trust-fill" style="width: 50%"></div>
+            </div>
+            <div class="meter__ticks" aria-hidden="true">
+              <span>0</span><span>5</span><span>10</span>
+            </div>
+          </div>
+
+          <p class="card__body" id="tier-description"></p>
+
+          <h3 class="subheading">Permission mode</h3>
+          <ul class="tier-list" id="tier-list"></ul>
+
+          <div class="next-privilege" id="next-privilege"></div>
+        </div>
+
+        <div class="card">
+          <h3 class="subheading">Project performance</h3>
+          <p class="metric-label">Average of completed task scores</p>
+          <p class="big-metric" id="project-score">—</p>
+          <p class="card__body small" id="project-score-note"></p>
+          <ul class="badge-list" id="badges" aria-label="Earned process badges"></ul>
+        </div>
+
+        <div class="card">
+          <h3 class="subheading">Task contract</h3>
+          <p class="card__body small">
+            Nothing is scored unless it was agreed here first. If a violation is
+            not covered by this contract, Earnest must not punish it.
+          </p>
+          <dl class="contract" id="contract"></dl>
+          <details class="disclosure">
+            <summary>Edit the contract</summary>
+            <form id="contract-form" class="contract-form">
+              <label class="field">
+                <span class="field__label">Goal</span>
+                <textarea id="goal-input" rows="2"></textarea>
+              </label>
+              <label class="field">
+                <span class="field__label">Approved files (one glob per line)</span>
+                <textarea id="paths-input" rows="3"></textarea>
+                <span class="field__hint">Widening this also widens what the scope check forgives.</span>
+              </label>
+              <label class="field">
+                <span class="field__label">Invariants (one per line)</span>
+                <textarea id="invariants-input" rows="2"></textarea>
+              </label>
+              <button type="submit" class="btn btn--secondary">Save contract</button>
+            </form>
+          </details>
+        </div>
+      </section>
+
+      <!-- CENTRE: run, checks, score -->
+      <section class="column column--wide" aria-labelledby="task-heading">
+        <h2 id="task-heading" class="section-heading">Current task</h2>
+
+        <div class="card run-card">
+          <div class="run-card__intro">
+            <p class="metric-label">Scenario</p>
+            <div class="scenario-list" id="scenario-list" role="radiogroup" aria-label="Choose a simulated agent scenario"></div>
+          </div>
+
+          <div class="run-actions">
+            <button type="button" class="btn btn--primary" id="run-btn">Run verified task</button>
+            <p class="run-hint" id="run-hint">
+              Earnest enforces the contract at the filesystem boundary, then
+              scores what actually happened.
+            </p>
+          </div>
+          <p class="preview-link">
+            <a href="/preview/index.html" target="_blank" rel="noopener">
+              Open the sample project in a new tab
+              <span class="visually-hidden">(opens in a new tab)</span>
+            </a>
+            — this is the page the agent edits, served from the disposable workspace.
+          </p>
+        </div>
+
+        <div id="incident-banner" class="banner banner--critical" hidden>
+          <h3 class="banner__title" id="incident-title">Repair-only mode</h3>
+          <p id="incident-summary"></p>
+          <ul id="incident-detail" class="banner__list"></ul>
+          <div class="banner__actions">
+            <button type="button" class="btn btn--primary" id="repair-btn">Repair and verify</button>
+            <button type="button" class="btn btn--secondary" id="restore-btn">Restore checkpoint</button>
+          </div>
+        </div>
+
+        <div class="card" id="task-card">
+          <div class="task-card__head">
+            <div>
+              <p class="metric-label">Task status</p>
+              <p class="task-status" id="task-status">No task has run yet</p>
+            </div>
+            <div class="score-block">
+              <p class="metric-label">Task score</p>
+              <p class="score-value" id="task-score">—</p>
+              <p class="score-tag" id="task-score-tag"></p>
+            </div>
+          </div>
+
+          <p class="card__body" id="task-summary">
+            Choose a scenario and run a task to see how Earnest verifies the work.
+          </p>
+
+          <h3 class="subheading">Verifier</h3>
+          <ul class="check-list" id="check-list"></ul>
+
+          <div id="review-block" class="review-block" hidden>
+            <h3 class="subheading">Your review</h3>
+            <p class="card__body small">
+              Automation cannot judge whether this result suits your project.
+              Your review is what makes the score final.
+            </p>
+            <label class="field">
+              <span class="field__label">Note (optional)</span>
+              <input type="text" id="review-note" placeholder="For example: the alt text describes the image well" />
+            </label>
+            <div class="review-actions">
+              <button type="button" class="btn btn--primary" id="accept-btn">Accept result</button>
+              <button type="button" class="btn btn--secondary" id="reject-btn">Reject result</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 class="subheading">Score breakdown</h3>
+          <p class="card__body small">
+            Weighted dimensions, each rated 0–10. Evidence is shown next to the
+            number so the score can be argued with.
+          </p>
+          <div class="table-wrap">
+            <table class="breakdown">
+              <caption class="visually-hidden">
+                Task score by weighted dimension, with the evidence used for each rating
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Dimension</th>
+                  <th scope="col">Weight</th>
+                  <th scope="col">Rating</th>
+                  <th scope="col">Evidence</th>
+                </tr>
+              </thead>
+              <tbody id="breakdown-body">
+                <tr>
+                  <td colspan="4" class="empty">No task scored yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 class="subheading">Agent activity</h3>
+          <p class="card__body small">
+            What the agent tried, and what the policy did about it.
+          </p>
+          <ol class="action-list" id="action-list">
+            <li class="empty">No actions yet.</li>
+          </ol>
+        </div>
+
+        <div class="card">
+          <h3 class="subheading">Changed files</h3>
+          <p class="card__body small">
+            Real diffs from the disposable workspace, not a mock-up.
+          </p>
+          <div id="diff-list" class="diff-list">
+            <p class="empty">No changes yet.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT: ledger -->
+      <section class="column" aria-labelledby="ledger-heading">
+        <h2 id="ledger-heading" class="section-heading">Activity ledger</h2>
+
+        <div class="card">
+          <h3 class="subheading">Trust changes</h3>
+          <ol class="ledger-list" id="trust-history">
+            <li class="empty">No changes yet.</li>
+          </ol>
+        </div>
+
+        <div class="card">
+          <h3 class="subheading">All events</h3>
+          <p class="card__body small">
+            Every block, approval, score, and repair is recorded here. The ledger
+            is the record of truth when an agent's summary disagrees with reality.
+          </p>
+          <ol class="ledger-list" id="event-list">
+            <li class="empty">No events yet.</li>
+          </ol>
+        </div>
+
+        <div class="card card--muted">
+          <h3 class="subheading">What this demo is</h3>
+          <ul class="plain-list small">
+            <li>Agent actions are scripted, not a live model.</li>
+            <li>Permissions are enforced in code, not requested in a prompt.</li>
+            <li>Scoring uses the checks shown above, and no others.</li>
+            <li>A real deployment would need a sandboxed agent adapter.</li>
+          </ul>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>
+        Earnest scores one task at a time and tracks trust per project. It does
+        not certify that an AI model is safe in general.
+      </p>
+    </footer>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

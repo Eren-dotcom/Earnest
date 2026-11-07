@@ -1,0 +1,65 @@
+/* Layout for the sample project. Treated as a protected invariant: the demo
+   task must not change layout, so any edit here is a violation. */
+:root {
+  --ink: #1b1b1f;
+  --paper: #fbfaf8;
+  --accent: #2c5d8f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+  line-height: 1.6;
+}
+
+.nav {
+  display: flex;
+  gap: 1.25rem;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #e4e0d8;
+}
+
+.nav__link {
+  color: var(--accent);
+  text-decoration: none;
+  border-radius: 0.25rem;
+}
+
+.nav__link:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.nav__link--current {
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.hero {
+  display: grid;
+  gap: 1rem;
+  padding: 2rem 1.5rem;
+  max-width: 42rem;
+}
+
+.hero__image {
+  width: 100%;
+  height: auto;
+  border-radius: 0.75rem;
+}
+
+.hero__caption {
+  font-size: 0.95rem;
+  color: #4a4a52;
+}
+
+main {
+  padding-bottom: 3rem;
+}
