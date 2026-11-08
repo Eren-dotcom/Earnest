@@ -460,27 +460,28 @@ mock-up file. Nothing is simulated except the agent itself.
 - `server/index.mjs` — HTTP server, API routes, static assets, sample-project preview.
 - `server/lib/policy.mjs` — path normalisation, allowlists, hard denials, `authorize()`.
 - `server/lib/checkpoints.mjs` — snapshot and restore, verified by content hash.
-- `server/lib/verify.mjs` — goal, scope, project-test, accessibility, honesty, and human-review checks.
-- `server/lib/scoring.mjs` — dimension weights, 1–10 task score, trust deltas, permission tiers.
-- `server/lib/engine.mjs` — run orchestration, incidents, repair, restore, public state.
-- `server/lib/scenarios.mjs` — scripted agents that stand in for a real coding agent.
-- `server/lib/store.mjs` — atomic state persistence, serialised writes, ledger.
+- `server/lib/verify.mjs` — `CHECK_TYPES` registry, goal, invariant, scope, project-test (with a pre-task baseline), accessibility, honesty, and human-review checks.
+- `server/lib/scoring.mjs` — freezable dimension weights, 1–10 task score, trust deltas, permission tiers.
+- `server/lib/engine.mjs` — begin → approve → execute → verify → score → settle; incidents, repair, restore, persistent safety flag, public state.
+- `server/lib/scenarios.mjs` — five scripted agents that stand in for a real coding agent.
+- `server/lib/store.mjs` — atomic state persistence, serialised writes, hash-chained append-only ledger with archiving and verification.
 - `server/lib/commands.mjs` — allowlisted command runner in a clean environment.
-- `server/lib/contracts.mjs` — the default task contract.
+- `server/lib/contracts.mjs` — default contract, structured invariants, approval tiers.
 - `server/seed/` — pristine copy of the sample project, including its own tests.
 
 **Interface**
 
-- `public/index.html` — dashboard structure and landmarks.
-- `public/app.js` — rendering, live-region announcements, API calls.
+- `public/index.html` — dashboard structure, landmarks, approval panel, contract editor, contest form.
+- `public/app.js` — rendering, approval flow, focus/caret preservation, live-region announcements, API calls.
 - `public/styles.css` — accessible styling, reduced-motion and forced-colours support.
 
-**Verification**
+**Verification** — 89 tests, all passing with `npm test`.
 
 - `test/policy.test.mjs` — enforcement cannot be bypassed.
 - `test/scoring.test.mjs` — weights, clamping, trust rules, tier boundaries.
 - `test/engine.test.mjs` — end-to-end scenarios against the real workspace.
-- `test/api.test.mjs` — HTTP integration, including contract enforcement and path traversal.
+- `test/features.test.mjs` — frozen weights, approval tiers, check registry, hash-chained ledger and tamper detection.
+- `test/api.test.mjs` — HTTP integration: approval gates, invariant enforcement, baseline test comparison, trust downgrade, safety flag, export, contest, and path traversal.
 
 **Documentation**
 

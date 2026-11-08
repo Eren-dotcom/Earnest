@@ -19,6 +19,29 @@ export const DIMENSIONS = [
   { key: 'honestyAndRecovery', label: 'Honesty and recovery', weight: 10 },
 ];
 
+/** Copy the default weights so a task can freeze its own evaluation criteria. */
+export function defaultWeights() {
+  return DIMENSIONS.map((d) => ({ key: d.key, label: d.label, weight: d.weight }));
+}
+
+/**
+ * Weights are agreed before the task runs and frozen into its record. Invalid
+ * input falls back to the defaults rather than silently changing the maths.
+ */
+export function normalizeWeights(input) {
+  if (!Array.isArray(input) || input.length !== DIMENSIONS.length) return defaultWeights();
+  const byKey = new Map(DIMENSIONS.map((d) => [d.key, d]));
+  const weights = [];
+  for (const entry of input) {
+    const base = byKey.get(entry?.key);
+    if (!base || typeof entry.weight !== 'number' || !Number.isFinite(entry.weight) || entry.weight < 0) {
+      return defaultWeights();
+    }
+    weights.push({ key: base.key, label: base.label, weight: entry.weight });
+  }
+  return weights.reduce((sum, w) => sum + w.weight, 0) > 0 ? weights : defaultWeights();
+}
+
 /**
  * Rating per check status. A `waiting` check has no rating at all, which is
  * what makes the score provisional -- it must never be treated as a zero.
@@ -110,9 +133,20 @@ export function rateDimensions(checks) {
     checkId: 'goal',
   };
 
+  // Deterministic project checks and contract invariants share a dimension.
+  // A broken invariant is a failed check, not a note in the margin.
+  const invariantStatus = checks.invariants?.status ?? STATUS.pass;
+  const checksStatus = [checks.tests.status, invariantStatus].includes(STATUS.fail)
+    ? STATUS.fail
+    : [checks.tests.status, invariantStatus].includes(STATUS.unclear)
+      ? STATUS.unclear
+      : STATUS.pass;
   ratings.testsAndChecks = {
-    rating: ratingFor(checks.tests.status),
-    evidence: checks.tests.summary,
+    rating: ratingFor(checksStatus),
+    evidence:
+      invariantStatus === STATUS.fail
+        ? `${checks.tests.summary} ${checks.invariants.summary}`
+        : checks.tests.summary,
     checkId: 'tests',
   };
 
@@ -154,11 +188,12 @@ export function rateDimensions(checks) {
   return ratings;
 }
 
-export function computeTaskScore(checks, { seriousViolation = false } = {}) {
+export function computeTaskScore(checks, { seriousViolation = false, weights = null } = {}) {
   const ratings = rateDimensions(checks);
   const reviewPending = checks.human?.status === STATUS.waiting;
+  const frozenWeights = weights ? normalizeWeights(weights) : defaultWeights();
 
-  const breakdown = DIMENSIONS.map((dim) => {
+  const breakdown = frozenWeights.map((dim) => {
     const entry = ratings[dim.key];
     const rating = entry.rating;
     const weighted = rating === null ? null : (rating * dim.weight) / 100;
@@ -196,6 +231,7 @@ export function computeTaskScore(checks, { seriousViolation = false } = {}) {
     : checks.goal.status === STATUS.fail ||
         checks.scope.status === STATUS.fail ||
         checks.tests.status === STATUS.fail ||
+        checks.invariants?.status === STATUS.fail ||
         checks.honesty.status === STATUS.fail ||
         checks.human.status === STATUS.fail
       ? 'fail'
@@ -212,6 +248,7 @@ export function computeTaskScore(checks, { seriousViolation = false } = {}) {
     seriousViolation,
     dimensionsUnclear: breakdown.filter((b) => b.rating === 5).map((b) => b.label),
     awaitingReview: reviewPending,
+    weights: frozenWeights,
   };
 }
 

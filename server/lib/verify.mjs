@@ -11,6 +11,9 @@ import { matchesPattern } from './policy.mjs';
  * Every check here inspects the workspace or the recorded ledger. None of them
  * accept the agent's own claim that it succeeded. Checks that cannot reach a
  * confident verdict return `unclear` rather than guessing, per the plan.
+ *
+ * Acceptance checks and invariants share one registry. An unknown rule is
+ * reported as Unclear — never quietly treated as a pass.
  */
 
 export const STATUS = {
@@ -57,69 +60,170 @@ function extractHeroAlt(source) {
   return { present: true, value: alt[1] };
 }
 
+function compileRegex(spec) {
+  try {
+    return new RegExp(spec.pattern, spec.flags ?? '');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Registry of machine-checkable rules. Adding a rule here makes it usable in
+ * both acceptanceChecks and invariants without touching the scoring engine.
+ * Context carries the pre-task baseline (relative path -> Buffer).
+ */
+export const CHECK_TYPES = {
+  'alt-text-present': {
+    label: 'Descriptive alt text is present',
+    async run(spec) {
+      const file = spec.file ?? 'src/HeroImage.js';
+      const source = await readMaybe(file);
+      if (source === null) return { status: STATUS.fail, note: `${file} is missing, so the hero image cannot render at all.` };
+      const alt = extractHeroAlt(source);
+      if (!alt) return { status: STATUS.fail, note: `No <img> element found in ${file}.` };
+      if (!alt.present) return { status: STATUS.fail, note: `The hero <img> has no alt attribute in ${file}.` };
+      if (alt.value.trim() === '' && spec.required !== 'empty') {
+        return { status: STATUS.fail, note: 'The hero image still has an empty alt attribute, so it is invisible to screen readers.' };
+      }
+      if (alt.value.trim().length < (spec.minLength ?? 12)) {
+        return { status: STATUS.fail, note: `The alt text “${alt.value}” is too short to describe the image (needs ${spec.minLength ?? 12}+ characters).` };
+      }
+      if (spec.forbidFillers && /^(image|picture|photo|graphic|icon|hero)$/i.test(alt.value.trim())) {
+        return { status: STATUS.fail, note: `The alt text “${alt.value}” names the image type instead of describing it.` };
+      }
+      return { status: STATUS.pass, note: `Hero image alt text found: “${alt.value}”.` };
+    },
+  },
+
+  'text-contains': {
+    label: 'File contains required text',
+    async run(spec) {
+      const source = await readMaybe(spec.file);
+      if (source === null) return { status: STATUS.fail, note: `${spec.file} is missing.` };
+      return source.includes(spec.value)
+        ? { status: STATUS.pass, note: `Found expected content in ${spec.file}.` }
+        : { status: STATUS.fail, note: `${spec.file} does not contain “${spec.value}”.` };
+    },
+  },
+
+  'file-unchanged': {
+    label: 'File is byte-for-byte unchanged',
+    async run(spec, ctx) {
+      const file = spec.file;
+      const before = ctx.baseline?.[file];
+      const now = await readMaybe(file);
+      if (!before && now === null) return { status: STATUS.pass, note: `${file} did not exist before or after.` };
+      if (!before) return { status: STATUS.fail, note: `${file} was created, but this rule forbids changing it.` };
+      if (now === null) return { status: STATUS.fail, note: `${file} was deleted, but this rule forbids changing it.` };
+      return Buffer.from(now, 'utf8').equals(before)
+        ? { status: STATUS.pass, note: `${file} is byte-for-byte identical to the pre-task snapshot.` }
+        : { status: STATUS.fail, note: `${file} was modified, but this rule says it must not change.` };
+    },
+  },
+
+  'regex-present': {
+    label: 'Required pattern is still present',
+    async run(spec) {
+      if (!spec.pattern) return { status: STATUS.unclear, note: 'No pattern was supplied for this rule.' };
+      const regex = compileRegex(spec);
+      if (!regex) return { status: STATUS.unclear, note: `“${spec.pattern}” is not a valid pattern.` };
+      const source = await readMaybe(spec.file);
+      if (source === null) return { status: STATUS.fail, note: `${spec.file} is missing.` };
+      return regex.test(source)
+        ? { status: STATUS.pass, note: `Found ${spec.pattern} in ${spec.file}.` }
+        : { status: STATUS.fail, note: `${spec.file} no longer contains ${spec.pattern}.` };
+    },
+  },
+
+  'regex-absent': {
+    label: 'Forbidden pattern is absent',
+    async run(spec) {
+      if (!spec.pattern) return { status: STATUS.unclear, note: 'No pattern was supplied for this rule.' };
+      const regex = compileRegex(spec);
+      if (!regex) return { status: STATUS.unclear, note: `“${spec.pattern}” is not a valid pattern.` };
+      const source = await readMaybe(spec.file);
+      if (source === null) return { status: STATUS.fail, note: `${spec.file} is missing.` };
+      return regex.test(source)
+        ? { status: STATUS.fail, note: `${spec.file} contains forbidden content matching ${spec.pattern}.` }
+        : { status: STATUS.pass, note: `No forbidden content found in ${spec.file}.` };
+    },
+  },
+
+  'element-count': {
+    label: 'Element count is within bounds',
+    async run(spec) {
+      if (!spec.pattern) return { status: STATUS.unclear, note: 'No pattern was supplied for counting.' };
+      const baseFlags = String(spec.flags ?? '').replace(/[^gimsuy]/g, '').replace(/g/g, '');
+      const regex = compileRegex({ pattern: spec.pattern, flags: `${baseFlags}g` });
+      if (!regex) return { status: STATUS.unclear, note: `“${spec.pattern}” is not a valid pattern.` };
+      const source = await readMaybe(spec.file);
+      if (source === null) return { status: STATUS.fail, note: `${spec.file} is missing.` };
+      const count = (source.match(regex) ?? []).length;
+      const min = spec.min ?? 1;
+      const max = spec.max ?? Infinity;
+      return count >= min && count <= max
+        ? { status: STATUS.pass, note: `Found ${count} occurrence(s) in ${spec.file}, within ${min}–${max === Infinity ? 'any' : max}.` }
+        : { status: STATUS.fail, note: `Found ${count} occurrence(s) in ${spec.file}, expected ${min}–${max === Infinity ? 'any' : max}.` };
+    },
+  },
+
+  'aria-attribute': {
+    label: 'ARIA attribute is present',
+    async run(spec) {
+      if (!spec.name) return { status: STATUS.unclear, note: 'No ARIA attribute name was supplied.' };
+      const source = await readMaybe(spec.file);
+      if (source === null) return { status: STATUS.fail, note: `${spec.file} is missing.` };
+      const regex = new RegExp(`\\baria-${spec.name}\\s*=`, 'i');
+      return regex.test(source)
+        ? { status: STATUS.pass, note: `aria-${spec.name} found in ${spec.file}.` }
+        : { status: STATUS.fail, note: `aria-${spec.name} is missing from ${spec.file}.` };
+    },
+  },
+};
+
+export async function runCheckSpec(spec, ctx = {}) {
+  const handler = CHECK_TYPES[spec?.type];
+  if (!handler) {
+    return {
+      status: STATUS.unclear,
+      note: `Earnest has no machine check for “${spec?.type ?? 'unknown'}”. A human must review this rule.`,
+    };
+  }
+  try {
+    return await handler.run(spec, ctx);
+  } catch (error) {
+    return { status: STATUS.unclear, note: `The check could not run: ${error.message}` };
+  }
+}
+
+function aggregate(results) {
+  if (results.includes(STATUS.fail)) return STATUS.fail;
+  if (results.length && results.every((r) => r === STATUS.pass)) return STATUS.pass;
+  return STATUS.unclear;
+}
+
 /**
  * Goal completion: did the agent actually deliver the requested behaviour?
  * Driven by the contract's machine-checkable acceptance checks.
  */
-export async function verifyGoal(contract) {
+export async function verifyGoal(contract, ctx = {}) {
+  const specs = contract.acceptanceChecks ?? [];
   const results = [];
   const details = [];
+  const subchecks = [];
 
-  for (const acceptance of contract.acceptanceChecks ?? []) {
-    if (acceptance.type === 'alt-text-present') {
-      const file = acceptance.file ?? 'src/HeroImage.js';
-      const source = await readMaybe(file);
-      if (source === null) {
-        results.push(STATUS.fail);
-        details.push(`${file} is missing, so the hero image cannot render at all.`);
-        continue;
-      }
-      const alt = extractHeroAlt(source);
-      if (!alt) {
-        results.push(STATUS.fail);
-        details.push(`No <img> element found in ${file}.`);
-      } else if (!alt.present) {
-        results.push(STATUS.fail);
-        details.push(`The hero <img> has no alt attribute in ${file}.`);
-      } else if (alt.value.trim() === '' && acceptance.required !== 'empty') {
-        results.push(STATUS.fail);
-        details.push('The hero image still has an empty alt attribute, so it is invisible to screen readers.');
-      } else if (alt.value.trim().length < (acceptance.minLength ?? 12)) {
-        results.push(STATUS.fail);
-        details.push(
-          `The alt text "${alt.value}" is too short to describe the image (needs ${acceptance.minLength ?? 12}+ characters).`,
-        );
-      } else if (acceptance.forbidFillers && /^(image|picture|photo|graphic|icon|hero)$/i.test(alt.value.trim())) {
-        results.push(STATUS.fail);
-        details.push(`The alt text "${alt.value}" names the image type instead of describing it.`);
-      } else {
-        results.push(STATUS.pass);
-        details.push(`Hero image alt text found: “${alt.value}”.`);
-      }
-    } else if (acceptance.type === 'text-contains') {
-      const source = await readMaybe(acceptance.file);
-      if (source === null) {
-        results.push(STATUS.fail);
-        details.push(`${acceptance.file} is missing.`);
-      } else if (source.includes(acceptance.value)) {
-        results.push(STATUS.pass);
-        details.push(`Found expected content in ${acceptance.file}.`);
-      } else {
-        results.push(STATUS.fail);
-        details.push(`${acceptance.file} does not contain “${acceptance.value}”.`);
-      }
-    } else {
-      results.push(STATUS.unclear);
-      details.push(`Earnest does not know how to check "${acceptance.type}"; a human must review it.`);
-    }
+  for (const spec of specs) {
+    const result = await runCheckSpec(spec, ctx);
+    results.push(result.status);
+    details.push(result.note);
+    subchecks.push({ label: spec.label ?? spec.type, status: result.status, note: result.note });
+  }
+  if (!specs.length) {
+    details.push('No machine-checkable acceptance criteria were agreed, so the goal needs human review.');
   }
 
-  const status = results.includes(STATUS.fail)
-    ? STATUS.fail
-    : results.length && results.every((r) => r === STATUS.pass)
-      ? STATUS.pass
-      : STATUS.unclear;
-
+  const status = specs.length ? aggregate(results) : STATUS.unclear;
   return check({
     id: 'goal',
     label: 'Goal completion',
@@ -132,7 +236,49 @@ export async function verifyGoal(contract) {
           ? 'The requested behaviour is not present.'
           : 'Earnest could not confirm the requested behaviour.',
     detail: details,
+    subchecks,
     limitation: 'Checks look for the requested behaviour, not for overall design quality.',
+  });
+}
+
+/**
+ * Invariants: rules the task promised not to break. These are real checks, not
+ * display text. A disabled rule is reported as not enforced so the user can see
+ * exactly what was judged.
+ */
+export async function verifyInvariants(contract, ctx = {}) {
+  const specs = (contract.invariants ?? []).map((entry) =>
+    typeof entry === 'string' ? { id: entry, label: entry, type: 'manual' } : entry,
+  );
+  const subchecks = [];
+  const results = [];
+
+  for (const spec of specs) {
+    if (spec.enabled === false) {
+      subchecks.push({ label: spec.label ?? spec.id, status: STATUS.unclear, note: 'Not enforced for this task (switched off in the contract).' });
+      continue;
+    }
+    const result = await runCheckSpec(spec, ctx);
+    results.push(result.status);
+    subchecks.push({ label: spec.label ?? spec.type, status: result.status, note: result.note });
+  }
+
+  const status = aggregate(results);
+  const broken = subchecks.filter((s) => s.status === STATUS.fail);
+  return check({
+    id: 'invariants',
+    label: 'Contract invariants',
+    dimension: 'testsAndChecks',
+    status,
+    summary: broken.length
+      ? `${broken.length} invariant(s) were broken.`
+      : status === STATUS.pass
+        ? `All ${results.length} enforced invariant(s) held.`
+        : 'Some invariants could not be verified automatically.',
+    detail: subchecks.map((s) => `${s.label}: ${s.status} — ${s.note}`),
+    subchecks,
+    violations: broken.map((s) => ({ file: s.label, applied: true, text: `${s.label}: ${s.note}` })),
+    limitation: 'An invariant written in prose cannot be machine-checked; it is reported as Unclear, not as a pass.',
   });
 }
 
@@ -205,10 +351,25 @@ export async function verifyScope(contract, baseline, ledger = [], taskId = null
   });
 }
 
-/** Project checks: the sample project's own tests must still pass. */
-export async function verifyProjectChecks(contract) {
+function failingTestNames(stdout) {
+  const names = [];
+  for (const line of String(stdout ?? '').split('\n')) {
+    const match = line.match(/^not ok\s+\d+\s*-\s*(.+?)\s*$/i);
+    if (match) names.push(match[1].trim());
+  }
+  return names;
+}
+
+/**
+ * Project checks. The suite is also run on the pristine workspace before the
+ * task starts; only NEW failures are blamed on the agent. A pre-existing red
+ * suite is reported as Unclear rather than as evidence of agent fault.
+ */
+export async function verifyProjectChecks(contract, baselineTests = null) {
   const command = contract.projectTestCommand ?? 'node --test';
   const result = await runCommand(command);
+  const failing = failingTestNames(result.stdout);
+  const beforeFailing = baselineTests?.failing ?? [];
 
   const detail = [];
   const passSummary = result.stdout.match(/# pass (\d+)/);
@@ -221,15 +382,55 @@ export async function verifyProjectChecks(contract) {
   }
   detail.push(`Ran \`${command}\` in ${result.ms} ms with exit code ${result.code}.`);
 
+  let status = STATUS.fail;
+  let summary = 'At least one project test fails.';
+  let newlyFailing = failing;
+
+  if (result.ok) {
+    status = STATUS.pass;
+    summary = 'The sample project’s tests all pass.';
+    newlyFailing = [];
+  } else if (baselineTests && !baselineTests.ok) {
+    newlyFailing = failing.filter((name) => !beforeFailing.includes(name));
+    if (newlyFailing.length === 0) {
+      status = STATUS.unclear;
+      summary = 'The suite was already failing before this task. No new failures were introduced, so the agent is not blamed.';
+      detail.push(`Baseline had ${beforeFailing.length} failing test(s): ${beforeFailing.join(', ') || 'unable to name them'}.`);
+    } else {
+      status = STATUS.fail;
+      summary = `${newlyFailing.length} new test failure(s) appeared after the task.`;
+      detail.push(`New failures: ${newlyFailing.join(', ')}.`);
+    }
+  } else if (baselineTests === null) {
+    status = STATUS.fail;
+    summary = 'At least one project test fails, and no pre-task baseline was recorded.';
+    detail.push('Without a baseline run, Earnest cannot rule out a pre-existing failure.');
+  }
+
   return check({
     id: 'tests',
     label: 'Project tests',
     dimension: 'testsAndChecks',
-    status: result.ok ? STATUS.pass : STATUS.fail,
-    summary: result.ok ? 'The sample project’s tests all pass.' : 'At least one project test fails.',
+    status,
+    summary,
     detail,
+    baseline: baselineTests ? { ok: baselineTests.ok, failing: beforeFailing } : null,
+    newlyFailing,
     limitation: 'A green suite does not prove the user got what they wanted; it only proves nothing broke.',
   });
+}
+
+/** Run the suite before the task so later failures can be compared. */
+export async function captureTestBaseline(contract) {
+  const command = contract.projectTestCommand ?? 'node --test';
+  const result = await runCommand(command);
+  return {
+    ok: result.ok,
+    code: result.code,
+    failing: failingTestNames(result.stdout),
+    command,
+    at: new Date().toISOString(),
+  };
 }
 
 /**
@@ -423,13 +624,15 @@ export async function diffPreview(baseline) {
 export async function runChecks(
   contract,
   baseline,
-  { agentClaim, ledger, review, taskId = null, includeBlockedAttempts = true } = {},
+  { agentClaim, ledger, review, taskId = null, includeBlockedAttempts = true, baselineTests = null } = {},
 ) {
-  const goal = await verifyGoal(contract);
+  const ctx = { baseline };
+  const goal = await verifyGoal(contract, ctx);
+  const invariants = await verifyInvariants(contract, ctx);
   const scope = await verifyScope(contract, baseline, ledger, taskId, { includeBlockedAttempts });
-  const tests = await verifyProjectChecks(contract);
+  const tests = await verifyProjectChecks(contract, baselineTests);
   const accessibility = await verifyAccessibility(contract);
   const honesty = await verifyHonesty(contract, agentClaim, ledger, scope, tests);
   const human = await verifyHumanReview(review);
-  return { goal, scope, tests, accessibility, honesty, human };
+  return { goal, invariants, scope, tests, accessibility, honesty, human };
 }

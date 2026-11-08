@@ -34,7 +34,7 @@
       <p id="alert-region" class="visually-hidden" role="alert" aria-live="assertive" aria-atomic="true"></p>
     </div>
 
-    <main id="main" class="layout">
+    <main id="main" class="layout" tabindex="-1">
       <!-- LEFT: trust, permissions, contract -->
       <section class="column" aria-labelledby="trust-heading">
         <h2 id="trust-heading" class="section-heading">Trust and permissions</h2>
@@ -77,6 +77,7 @@
           <p class="metric-label">Average of completed task scores</p>
           <p class="big-metric" id="project-score">—</p>
           <p class="card__body small" id="project-score-note"></p>
+          <p class="safety-flag" id="safety-flag" role="status"></p>
           <ul class="badge-list" id="badges" aria-label="Earned process badges"></ul>
         </div>
 
@@ -87,6 +88,7 @@
             not covered by this contract, Earnest must not punish it.
           </p>
           <dl class="contract" id="contract"></dl>
+          <ul class="plain-list small" id="contract-warnings" aria-label="Contract cautions"></ul>
           <details class="disclosure">
             <summary>Edit the contract</summary>
             <form id="contract-form" class="contract-form">
@@ -99,10 +101,14 @@
                 <textarea id="paths-input" rows="3"></textarea>
                 <span class="field__hint">Widening this also widens what the scope check forgives.</span>
               </label>
-              <label class="field">
-                <span class="field__label">Invariants (one per line)</span>
-                <textarea id="invariants-input" rows="2"></textarea>
-              </label>
+              <fieldset class="field">
+                <legend class="field__label">Enforced invariants</legend>
+                <p class="field__hint">
+                  These are machine checks, not prose. Switch one off only if you
+                  really mean to stop enforcing it.
+                </p>
+                <div id="invariant-toggles" class="invariant-toggles"></div>
+              </fieldset>
               <button type="submit" class="btn btn--secondary">Save contract</button>
             </form>
           </details>
@@ -120,6 +126,15 @@
           </div>
 
           <div class="run-actions">
+            <label class="field field--inline">
+              <span class="field__label">Approval before edits</span>
+              <select id="approval-mode">
+                <option value="tier">Follow the trust tier (recommended)</option>
+                <option value="auto">Run immediately</option>
+                <option value="plan">Preview the plan, approve once</option>
+                <option value="per-edit">Approve each individual edit</option>
+              </select>
+            </label>
             <button type="button" class="btn btn--primary" id="run-btn">Run verified task</button>
             <p class="run-hint" id="run-hint">
               Earnest enforces the contract at the filesystem boundary, then
@@ -142,6 +157,17 @@
           <div class="banner__actions">
             <button type="button" class="btn btn--primary" id="repair-btn">Repair and verify</button>
             <button type="button" class="btn btn--secondary" id="restore-btn">Restore checkpoint</button>
+          </div>
+        </div>
+
+        <div class="card approval-panel" id="approval-panel" hidden>
+          <h3 class="subheading" id="approval-title">Approval needed</h3>
+          <p class="card__body" id="approval-summary"></p>
+          <ol class="approval-plan" id="approval-plan"></ol>
+          <div class="approval-actions">
+            <button type="button" class="btn btn--primary" id="approve-btn">Allow this edit</button>
+            <button type="button" class="btn btn--secondary" id="decline-btn">Decline this edit</button>
+            <button type="button" class="btn btn--ghost" id="cancel-btn">Cancel the run</button>
           </div>
         </div>
 
@@ -188,6 +214,7 @@
             Weighted dimensions, each rated 0–10. Evidence is shown next to the
             number so the score can be argued with.
           </p>
+          <p class="weights-note" id="weights-note"></p>
           <div class="table-wrap">
             <table class="breakdown">
               <caption class="visually-hidden">
@@ -253,12 +280,39 @@
           </ol>
         </div>
 
+        <div class="card">
+          <h3 class="subheading">Ledger integrity</h3>
+          <p class="card__body small" id="ledger-integrity">Checking the event chain…</p>
+          <p class="export-links">
+            <a href="/api/export?format=csv" download="earnest-ledger.csv">Download CSV</a>
+            <span aria-hidden="true">·</span>
+            <a href="/api/export?format=json" download="earnest-ledger.json">Download JSON</a>
+          </p>
+          <form id="contest-form" class="contest-form">
+            <h4 class="subheading">Contest an event</h4>
+            <p class="card__body small">
+              If a recorded event is wrong, add a dispute. The original entry is
+              never edited — a new event is appended, so the chain stays intact.
+            </p>
+            <label class="field">
+              <span class="field__label">Event</span>
+              <select id="contest-event-id"></select>
+            </label>
+            <label class="field">
+              <span class="field__label">Why it is wrong</span>
+              <input type="text" id="contest-note" placeholder="For example: the file was already like that" />
+            </label>
+            <button type="submit" class="btn btn--secondary">Record dispute</button>
+          </form>
+        </div>
+
         <div class="card card--muted">
           <h3 class="subheading">What this demo is</h3>
           <ul class="plain-list small">
             <li>Agent actions are scripted, not a live model.</li>
-            <li>Permissions are enforced in code, not requested in a prompt.</li>
-            <li>Scoring uses the checks shown above, and no others.</li>
+            <li>Permissions are enforced in code, then gated by your trust tier.</li>
+            <li>Invariants and scoring weights are frozen before a task runs.</li>
+            <li>Every event is hash-chained. Disputes append; nothing is edited.</li>
             <li>A real deployment would need a sandboxed agent adapter.</li>
           </ul>
         </div>

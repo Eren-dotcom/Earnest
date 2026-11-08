@@ -5,14 +5,19 @@
  *  - every status has a text label plus a glyph, never colour alone;
  *  - results are announced through a polite live region, errors assertively;
  *  - state is re-rendered from the API, never optimistically assumed;
+ *  - keyboard focus and caret position survive a re-render;
  *  - destructive-looking actions are described in plain language first.
  */
 
 const state = {
   data: null,
   contract: null,
+  defaultContract: null,
+  weights: null,
+  warnings: [],
   scenario: 'safe-success',
   draft: null,
+  invariantEnabled: null,
   busy: false,
 };
 
@@ -90,6 +95,12 @@ function clockTime(iso) {
   return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+function asInvariant(entry, i) {
+  return typeof entry === 'string'
+    ? { id: `manual-${i}`, label: entry, type: 'manual', enabled: true }
+    : { ...entry, enabled: entry.enabled !== false };
+}
+
 /* ------------------------------------------------------------------ api */
 
 async function api(path, body) {
@@ -121,6 +132,8 @@ async function withBusy(button, work) {
   } catch (error) {
     if (error.code === 'repair-required') {
       alertUser('Repair-only mode is active. Repair or restore the open incident before starting new work.');
+    } else if (error.code === 'approval-pending') {
+      alertUser('A plan is waiting for your approval. Approve, decline, or cancel it first.');
     } else {
       alertUser(error.message);
     }
@@ -171,7 +184,9 @@ function renderTrust(data) {
   const next = $('next-privilege');
   clear(next);
   next.append(
-    el('strong', { text: data.nextPrivilege.earned ? data.nextPrivilege.label : `Next earned privilege: ${data.nextPrivilege.label}` }),
+    el('strong', {
+      text: data.nextPrivilege.earned ? data.nextPrivilege.label : `Next earned privilege: ${data.nextPrivilege.label}`,
+    }),
     el('span', { text: data.nextPrivilege.detail }),
   );
 }
@@ -182,6 +197,12 @@ function renderProject(data) {
     data.projectScore === null
       ? 'No completed task yet. A simple average is used for this prototype, not a weighted one.'
       : `Simple average of ${data.taskCount} completed task${data.taskCount === 1 ? '' : 's'}. A high average never hides a separate safety flag.`;
+
+  const flag = $('safety-flag');
+  flag.dataset.active = data.safetyFlag.active ? 'true' : 'false';
+  flag.textContent = data.safetyFlag.active
+    ? `⚠ ${data.safetyFlag.text} Resolving an incident does not remove it from this record.`
+    : `✓ ${data.safetyFlag.text}`;
 
   const badges = $('badges');
   clear(badges);
@@ -196,6 +217,8 @@ function renderProject(data) {
 
 function renderContract(data) {
   const contract = state.contract ?? data.latestTask?.contract ?? {};
+  const invariants = (contract.invariants ?? []).map(asInvariant);
+
   const list = $('contract');
   clear(list);
 
@@ -211,19 +234,17 @@ function renderContract(data) {
     row('Goal', contract.goal ?? 'Not set'),
     row(
       'Approved files',
-      el(
-        'span',
-        { class: 'chip-row' },
-        (contract.allowedPaths ?? []).map((p) => el('span', { class: 'chip', text: p })),
-      ),
+      el('span', { class: 'chip-row' }, (contract.allowedPaths ?? []).map((p) => el('span', { class: 'chip', text: p }))),
     ),
     row('Allowed command', el('span', { class: 'chip', text: contract.projectTestCommand ?? 'node --test' })),
     row(
-      'Invariants',
+      'Invariants (enforced)',
       el(
         'ul',
         { class: 'plain-list small' },
-        (contract.invariants ?? []).map((i) => el('li', { text: i })),
+        invariants.map((i) =>
+          el('li', { text: `${i.label} — ${i.type === 'manual' ? 'needs human review' : i.type}${i.enabled ? '' : ' (off)'}` }),
+        ),
       ),
     ),
     row('Risk level', `${contract.riskLevel ?? 'low'} (${contract.reversible ? 'reversible' : 'not reversible'})`),
@@ -233,15 +254,37 @@ function renderContract(data) {
     ),
   );
 
+  const warnings = $('contract-warnings');
+  clear(warnings);
+  for (const warning of state.warnings) {
+    warnings.append(el('li', { text: `Note: ${warning}` }));
+  }
+
+  // Toggle list inside the disclosure. Stable ids let focus survive re-render.
+  const toggles = $('invariant-toggles');
+  clear(toggles);
+  for (const invariant of invariants) {
+    const id = `invariant-${invariant.id}`;
+    // A checkbox the user just ticked must survive an unrelated re-render.
+    const enabled = state.invariantEnabled?.[invariant.id] ?? invariant.enabled;
+    toggles.append(
+      el('label', { class: 'invariant-toggle', for: id }, [
+        el('input', { type: 'checkbox', id, checked: enabled, 'data-invariant-id': invariant.id }),
+        el('span', {}, [
+          el('span', { text: invariant.label }),
+          el('small', { text: invariant.type === 'manual' ? 'No machine check — reported as Unclear' : `${invariant.type}${invariant.file ? ` · ${invariant.file}` : ''}` }),
+        ]),
+      ]),
+    );
+  }
+
   if (!state.draft) {
     state.draft = {
       goal: contract.goal ?? '',
       paths: (contract.allowedPaths ?? []).join('\n'),
-      invariants: (contract.invariants ?? []).join('\n'),
     };
     $('goal-input').value = state.draft.goal;
     $('paths-input').value = state.draft.paths;
-    $('invariants-input').value = state.draft.invariants;
   }
 }
 
@@ -262,15 +305,16 @@ function renderScenarios(data) {
       },
     });
 
-    const label = el('label', { class: 'scenario', for: id }, [
-      input,
-      el('span', {}, [
-        el('span', { class: 'scenario__name', text: scenario.name }),
-        el('span', { class: 'scenario__tagline', text: scenario.tagline }),
-        el('span', { class: 'scenario__desc', text: scenario.description }),
+    list.append(
+      el('label', { class: 'scenario', for: id }, [
+        input,
+        el('span', {}, [
+          el('span', { class: 'scenario__name', text: scenario.name }),
+          el('span', { class: 'scenario__tagline', text: scenario.tagline }),
+          el('span', { class: 'scenario__desc', text: scenario.description }),
+        ]),
       ]),
-    ]);
-    list.append(label);
+    );
   }
 }
 
@@ -278,19 +322,20 @@ function renderRunControls(data) {
   const runBtn = $('run-btn');
   const scenario = data.scenarios.find((s) => s.id === state.scenario);
   runBtn.textContent = `Run: ${scenario?.name ?? 'task'}`;
-  runBtn.disabled = state.busy || data.repairOnly;
+  runBtn.disabled = state.busy || data.repairOnly || Boolean(data.activeTask) || Boolean(data.approval);
 
   const hint = $('run-hint');
   if (data.repairOnly) {
     hint.textContent =
       'Repair-only mode is active. Earnest will not start a new task until the open incident is repaired or the checkpoint is restored.';
+  } else if (data.approval) {
+    hint.textContent = 'A proposed plan is waiting for your decision. Nothing mutating has been applied yet.';
   } else if (data.activeTask) {
     hint.textContent = 'A task is waiting for your review. Complete it before starting another.';
   } else {
     hint.textContent =
       'Earnest enforces the contract at the filesystem boundary, then scores what actually happened.';
   }
-  runBtn.disabled = state.busy || data.repairOnly || Boolean(data.activeTask);
 }
 
 function renderIncident(data) {
@@ -303,19 +348,59 @@ function renderIncident(data) {
   banner.hidden = false;
   $('incident-title').textContent =
     data.incident.severity === 'critical' ? 'Stopped: protected path targeted' : 'Repair-only mode';
-
   $('incident-summary').textContent = `${data.incident.summary} New tasks are paused until this is resolved.`;
 
   const list = $('incident-detail');
   clear(list);
-  for (const line of data.incident.detail ?? []) {
-    list.append(el('li', { text: line }));
-  }
+  for (const line of data.incident.detail ?? []) list.append(el('li', { text: line }));
 
-  const restoreBtn = $('restore-btn');
-  restoreBtn.textContent = data.incident.blocked
+  $('restore-btn').textContent = data.incident.blocked
     ? 'Restore checkpoint (nothing was changed)'
     : 'Restore checkpoint';
+}
+
+function renderApproval(data) {
+  const panel = $('approval-panel');
+  const approval = data.approval;
+  if (!approval) {
+    panel.hidden = true;
+    return;
+  }
+
+  panel.hidden = false;
+  const planMode = approval.mode === 'plan';
+  $('approval-title').textContent = planMode
+    ? 'Preview the plan before any edit is applied'
+    : 'One change at a time';
+  $('approval-summary').textContent = planMode
+    ? `Your trust tier requires a plan preview. ${approval.total} action(s) would write files or run commands. Nothing has been applied yet.`
+    : `Edit ${approval.decided + 1} of ${approval.total}. Approve or decline each one individually. Nothing mutating is applied without your decision.`;
+  $('approve-btn').textContent = planMode ? 'Approve the whole plan' : 'Allow this edit';
+  $('decline-btn').textContent = planMode ? 'Decline the plan' : 'Decline this edit';
+
+  const list = $('approval-plan');
+  clear(list);
+  for (const item of approval.plan) {
+    const current = approval.awaiting?.index === item.index;
+    const decisionText = item.decision === 'allow' ? 'Allowed' : item.decision === 'deny' ? 'Declined' : item.requiresApproval ? 'Awaiting your decision' : 'Reads only — no approval needed';
+    const node = el('li', {
+      'data-current': current ? 'true' : 'false',
+      'data-decision': item.decision ?? 'none',
+    }, [
+      el('div', { class: 'approval-plan__head' }, [
+        el('span', {}, [
+          el('span', { class: 'approval-plan__path', text: `${item.type.toUpperCase()} · ${item.path}` }),
+          el('span', { text: ` — ${decisionText}` }),
+        ]),
+        el('span', { class: 'small', text: `Step ${item.index + 1}` }),
+      ]),
+      el('p', { class: 'small', text: item.note }),
+    ]);
+    if (current && item.preview) {
+      node.append(el('pre', { text: `${item.preview}\n… (preview truncated)` }));
+    }
+    list.append(node);
+  }
 }
 
 function checkItem(check) {
@@ -347,7 +432,6 @@ function checkItem(check) {
   if (check.limitation) {
     item.append(el('p', { class: 'check-item__limit', text: `Limitation: ${check.limitation}` }));
   }
-
   return item;
 }
 
@@ -371,6 +455,26 @@ function renderTask(data) {
     return;
   }
 
+  if (task.status === 'awaiting-approval') {
+    statusEl.textContent = 'Awaiting your approval';
+    scoreEl.textContent = '—';
+    tagEl.textContent = 'Not scored yet';
+    summaryEl.textContent = 'Review the proposed plan in the panel above. No edit is applied until you allow it.';
+    $('review-block').hidden = true;
+    checkList.append(el('li', { class: 'empty', text: 'Checks run after the plan is approved.' }));
+    return;
+  }
+
+  if (task.status === 'cancelled') {
+    statusEl.textContent = 'Cancelled';
+    scoreEl.textContent = '—';
+    tagEl.textContent = 'No result recorded';
+    summaryEl.textContent = 'You cancelled the proposed plan. No edit was applied and trust is unchanged.';
+    $('review-block').hidden = true;
+    checkList.append(el('li', { class: 'empty', text: 'No checks were run.' }));
+    return;
+  }
+
   const awaiting = task.status === 'awaiting-review';
   statusEl.textContent = awaiting
     ? 'Awaiting your review'
@@ -378,7 +482,7 @@ function renderTask(data) {
       ? 'Complete'
       : task.status;
 
-  scoreEl.textContent = `${task.score}/10`;
+  scoreEl.textContent = task.score === null || task.score === undefined ? '—' : `${task.score}/10`;
   tagEl.textContent = task.provisional
     ? 'Provisional — needs your review'
     : task.outcome === 'pass'
@@ -390,6 +494,7 @@ function renderTask(data) {
   const parts = [];
   if (task.checks) {
     parts.push(task.checks.goal.summary);
+    if (task.checks.invariants?.status === 'fail') parts.push(task.checks.invariants.summary);
     if (task.checks.scope.violations?.length) parts.push(task.checks.scope.summary);
     if (task.checks.tests.status === 'fail') parts.push(task.checks.tests.summary);
     if (task.checks.honesty.status === 'fail') parts.push(task.checks.honesty.summary);
@@ -397,33 +502,32 @@ function renderTask(data) {
   summaryEl.textContent = parts.join(' ');
 
   if (task.checks) {
-    const order = ['goal', 'scope', 'tests', 'accessibility', 'honesty', 'human'];
+    const order = ['goal', 'invariants', 'scope', 'tests', 'accessibility', 'honesty', 'human'];
     for (const key of order) {
-      const check = task.checks[key];
-      if (check) checkList.append(checkItem(check));
+      if (task.checks[key]) checkList.append(checkItem(task.checks[key]));
     }
   }
 
   $('review-block').hidden = !awaiting;
-  if (awaiting) {
-    $('review-note').value = '';
-  }
+  if (awaiting) $('review-note').value = '';
 }
 
 function renderBreakdown(data) {
   const body = $('breakdown-body');
   clear(body);
   const task = data.activeTask ?? data.latestTask;
+  const weights = task?.weights ?? state.weights ?? [];
+  $('weights-note').textContent = weights.length
+    ? `Weights frozen before this task ran: ${weights.map((w) => `${w.label} ${w.weight}%`).join(' · ')}. They cannot be changed after seeing the result.`
+    : 'Weights are frozen before each task runs, so the criteria cannot be changed after seeing the result.';
+
   if (!task?.breakdown?.length) {
     body.append(el('tr', {}, [el('td', { colspan: '4', class: 'empty', text: 'No task scored yet.' })]));
     return;
   }
 
   for (const dim of task.breakdown) {
-    const rating =
-      dim.rating === null
-        ? el('span', { class: 'unrated', text: 'Unrated' })
-        : `${dim.rating}/10`;
+    const rating = dim.rating === null ? el('span', { class: 'unrated', text: 'Unrated' }) : `${dim.rating}/10`;
     body.append(
       el('tr', {}, [
         el('td', { class: 'dim-name', text: dim.label }),
@@ -446,9 +550,10 @@ function renderActions(data) {
 
   for (const action of task.actions) {
     const denied = action.decision === 'deny';
+    const badge = denied ? (action.code === 'user-denied' ? 'DECLINED' : 'BLOCKED') : action.type.toUpperCase();
     list.append(
       el('li', { class: `action-item${denied ? ' action-item--denied' : ''}` }, [
-        el('span', { class: 'action-item__badge', text: denied ? 'BLOCKED' : action.type.toUpperCase() }),
+        el('span', { class: 'action-item__badge', text: badge }),
         el('span', {}, [
           el('span', { class: 'action-item__path', text: action.path }),
           el('span', { class: 'action-item__detail', text: ` ${action.detail}` }),
@@ -469,27 +574,24 @@ function renderDiffs(data) {
 
   for (const file of task.diff) {
     const lines = el('ul', { class: 'diff-lines' });
-    if (!file.lines.length) {
-      lines.append(el('li', { class: 'context', text: 'No line-level changes.' }));
-    }
-    for (const line of file.lines) {
-      lines.append(el('li', { class: line.type, text: line.text || ' ' }));
-    }
-    const node = el('div', { class: 'diff-file' }, [
-      el('div', { class: 'diff-file__head' }, [
-        el('span', { text: file.path }),
-        el('span', { class: 'diff-file__status', text: file.status }),
+    if (!file.lines.length) lines.append(el('li', { class: 'context', text: 'No line-level changes.' }));
+    for (const line of file.lines) lines.append(el('li', { class: line.type, text: line.text || ' ' }));
+    list.append(
+      el('div', { class: 'diff-file' }, [
+        el('div', { class: 'diff-file__head' }, [
+          el('span', { text: file.path }),
+          el('span', { class: 'diff-file__status', text: file.status }),
+        ]),
+        lines,
       ]),
-      lines,
-    ]);
-    list.append(node);
+    );
   }
-
-  const note = el('p', {
-    class: 'diff-note',
-    text: 'Diff read from the disposable workspace on disk. Blocked edits never reach this list.',
-  });
-  list.append(note);
+  list.append(
+    el('p', {
+      class: 'diff-note',
+      text: 'Diff read from the disposable workspace on disk. Blocked or declined edits never reach this list.',
+    }),
+  );
 }
 
 function renderLedger(data) {
@@ -527,58 +629,163 @@ function renderLedger(data) {
       );
     }
   }
+
+  const integrity = data.ledgerIntegrity;
+  $('ledger-integrity').textContent = integrity?.ok
+    ? `✓ ${integrity.reason} Head hash: ${String(integrity.head ?? '').slice(0, 12)}…`
+    : `✕ ${integrity?.reason ?? 'The event chain could not be verified.'}`;
+
+  // Keep the contest picker in sync without discarding the user's selection.
+  const select = $('contest-event-id');
+  const previous = select.value;
+  clear(select);
+  if (!data.ledger.length) {
+    select.append(el('option', { value: '', text: 'No events yet' }));
+  } else {
+    for (const entry of data.ledger.slice(0, 40)) {
+      const short = String(entry.text ?? '').length > 70 ? `${String(entry.text).slice(0, 67)}…` : String(entry.text ?? '');
+      select.append(el('option', { value: entry.id, text: `${clockTime(entry.at)} · ${short}` }));
+    }
+    if (previous && [...select.options].some((o) => o.value === previous)) select.value = previous;
+  }
 }
 
 function render() {
   const data = state.data;
   if (!data) return;
+
+  // Preserve keyboard focus and caret across a full re-render. Lists are
+  // rebuilt from scratch, so without this a keyboard user loses their place
+  // after every action.
+  const domToggles = [...document.querySelectorAll('[data-invariant-id]')];
+  if (domToggles.length) {
+    state.invariantEnabled = Object.fromEntries(domToggles.map((t) => [t.dataset.invariantId, t.checked]));
+  }
+
+  const active = document.activeElement;
+  const focusId = active && active !== document.body ? active.id : null;
+  let selection = null;
+  if (active instanceof HTMLTextAreaElement || (active instanceof HTMLInputElement && active.type === 'text')) {
+    try {
+      selection = { start: active.selectionStart, end: active.selectionEnd };
+    } catch {
+      selection = null;
+    }
+  }
+
   renderTrust(data);
   renderProject(data);
   renderContract(data);
   renderScenarios(data);
   renderRunControls(data);
   renderIncident(data);
+  renderApproval(data);
   renderTask(data);
   renderBreakdown(data);
   renderActions(data);
   renderDiffs(data);
   renderLedger(data);
+
+  if (focusId) {
+    const target = $(focusId);
+    if (target && !target.disabled && typeof target.focus === 'function' && target.offsetParent !== null) {
+      target.focus({ preventScroll: true });
+      if (selection && typeof target.setSelectionRange === 'function') {
+        try {
+          target.setSelectionRange(selection.start, selection.end);
+        } catch {
+          /* not a text control */
+        }
+      }
+      return;
+    }
+    // The control we were on is gone (for example an approved plan). Move
+    // focus somewhere predictable instead of dropping it to the document.
+    const main = $('main');
+    if (main) main.focus({ preventScroll: true });
+  }
 }
 
 /* --------------------------------------------------------------- events */
 
+function currentContract() {
+  const contract = state.contract ?? {};
+  const toggles = [...document.querySelectorAll('[data-invariant-id]')];
+  const enabled = Object.fromEntries(toggles.map((t) => [t.dataset.invariantId, t.checked]));
+  const invariants = (contract.invariants ?? []).map((entry, i) => {
+    const inv = asInvariant(entry, i);
+    return { ...inv, enabled: enabled[inv.id] ?? inv.enabled };
+  });
+  return {
+    ...contract,
+    goal: $('goal-input').value.trim() || contract.goal,
+    allowedPaths: $('paths-input')
+      .value.split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean),
+    invariants,
+  };
+}
+
 $('run-btn').addEventListener('click', async (event) => {
   const button = event.currentTarget;
-  const contract = state.contract ?? {};
   await withBusy(button, async () => {
     const payload = await api('/api/run', {
       scenarioId: state.scenario,
-      contract: {
-        goal: $('goal-input').value.trim() || contract.goal,
-        allowedPaths: $('paths-input')
-          .value.split('\n')
-          .map((l) => l.trim())
-          .filter(Boolean),
-        invariants: $('invariants-input')
-          .value.split('\n')
-          .map((l) => l.trim())
-          .filter(Boolean),
-        allowedCommands: contract.allowedCommands,
-        acceptanceChecks: contract.acceptanceChecks,
-        projectTestCommand: contract.projectTestCommand,
-        riskLevel: contract.riskLevel,
-        reversible: contract.reversible,
-        verificationPlan: contract.verificationPlan,
-        allowDelete: false,
-      },
+      approvalMode: $('approval-mode').value,
+      contract: currentContract(),
     });
     state.data = payload;
-    const task = payload.activeTask;
-    const blocked = task.actions.filter((a) => a.decision === 'deny').length;
+    if (payload.approval) {
+      announce(
+        `A plan is waiting for your approval. ${payload.approval.total} action(s) proposed. Nothing has been applied yet.`,
+      );
+    } else {
+      const task = payload.activeTask;
+      const blocked = task.actions.filter((a) => a.decision === 'deny' && a.code !== 'user-denied').length;
+      announce(
+        `Task finished. Provisional score ${task.score} out of 10. ${blocked} action${blocked === 1 ? '' : 's'} blocked by policy. Review the result to make the score final.`,
+      );
+    }
+  });
+});
+
+function announceApprovalOutcome(after) {
+  if (after.approval) {
+    const next = after.approval.awaiting;
     announce(
-      `Task finished. Provisional score ${task.score} out of 10. ` +
-        `${blocked} action${blocked === 1 ? '' : 's'} blocked by policy. Review the result to make the score final.`,
+      `Decision recorded. ${next ? `Next edit awaiting approval: ${next.path}. ${next.note}` : ''} Edit ${after.approval.decided + 1} of ${after.approval.total}.`,
     );
+  } else if (after.activeTask) {
+    const task = after.activeTask;
+    announce(
+      `All approved actions applied. Provisional score ${task.score} out of 10. Trust is ${after.trust} out of 10. Review the result to make the score final.`,
+    );
+  } else {
+    announce('The run was cancelled. No edit was applied and trust is unchanged.');
+  }
+}
+
+$('approve-btn').addEventListener('click', async (event) => {
+  await withBusy(event.currentTarget, async () => {
+    state.data = await api('/api/approve', { decision: 'allow' });
+    announceApprovalOutcome(state.data);
+  });
+});
+
+$('decline-btn').addEventListener('click', async (event) => {
+  await withBusy(event.currentTarget, async () => {
+    const isPlan = state.data.approval?.mode === 'plan';
+    state.data = await api('/api/approve', { decision: 'deny' });
+    if (isPlan) announce('You declined the plan. No edit was applied and trust is unchanged.');
+    else announceApprovalOutcome(state.data);
+  });
+});
+
+$('cancel-btn').addEventListener('click', async (event) => {
+  await withBusy(event.currentTarget, async () => {
+    state.data = await api('/api/cancel', {});
+    announce('The proposed plan was cancelled. No edit was applied and trust is unchanged.');
   });
 });
 
@@ -608,7 +815,7 @@ $('repair-btn').addEventListener('click', async (event) => {
     const resolved = state.data.incident?.status === 'resolved';
     announce(
       resolved
-        ? `Repair verified. The out-of-scope change was reverted. Trust is now ${state.data.trust} out of 10 and new tasks are allowed.`
+        ? `Repair verified. The out-of-scope change was reverted. Trust is now ${state.data.trust} out of 10 and new tasks are allowed. The incident stays on record.`
         : 'The repair did not clear the violation, so the incident stays open.',
     );
   });
@@ -629,27 +836,33 @@ $('restore-btn').addEventListener('click', async (event) => {
 $('reset-btn').addEventListener('click', async (event) => {
   await withBusy(event.currentTarget, async () => {
     state.data = await api('/api/reset', {});
+    state.contract = JSON.parse(JSON.stringify(state.defaultContract));
     state.draft = null;
+    state.invariantEnabled = null;
     announce('Demo reset. The workspace is a fresh copy of the sample project and trust is back to 5 out of 10.');
   });
 });
 
 $('contract-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  state.contract = {
-    ...state.contract,
-    goal: $('goal-input').value.trim(),
-    allowedPaths: $('paths-input')
-      .value.split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean),
-    invariants: $('invariants-input')
-      .value.split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean),
-  };
+  state.contract = currentContract();
   render();
   announce('Contract saved. The next task will be judged against these terms.');
+});
+
+$('contest-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const eventId = $('contest-event-id').value;
+  const note = $('contest-note').value.trim();
+  if (!eventId) {
+    alertUser('Choose an event to contest first.');
+    return;
+  }
+  await withBusy(event.currentTarget.querySelector('button'), async () => {
+    state.data = await api('/api/contest', { eventId, note });
+    $('contest-note').value = '';
+    announce('Your dispute was appended to the ledger. The original event was not edited, so the hash chain stays intact.');
+  });
 });
 
 /* ----------------------------------------------------------------- boot */
@@ -657,7 +870,10 @@ $('contract-form').addEventListener('submit', async (event) => {
 async function boot() {
   try {
     const payload = await api('/api/scenarios');
-    state.contract = payload.contract;
+    state.defaultContract = payload.contract;
+    state.contract = JSON.parse(JSON.stringify(payload.contract));
+    state.weights = payload.weights ?? null;
+    state.warnings = payload.warnings ?? [];
     state.data = await api('/api/state');
     state.scenario = state.data.scenarios[0]?.id ?? 'safe-success';
     render();
