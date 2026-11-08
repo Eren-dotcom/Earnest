@@ -1347,3 +1347,15 @@ textarea {
     display: none;
   }
 }
+
+/* ---------- trust-zero override ---------- */
+
+.override-block {
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border, #d9d3c7);
+}
+
+.override-block .btn {
+  margin-top: 0.5rem;
+}

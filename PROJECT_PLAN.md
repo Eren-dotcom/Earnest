@@ -475,13 +475,13 @@ mock-up file. Nothing is simulated except the agent itself.
 - `public/app.js` — rendering, approval flow, focus/caret preservation, live-region announcements, API calls.
 - `public/styles.css` — accessible styling, reduced-motion and forced-colours support.
 
-**Verification** — 89 tests, all passing with `npm test`.
+**Verification** — 90 tests, all passing with `npm test`.
 
 - `test/policy.test.mjs` — enforcement cannot be bypassed.
 - `test/scoring.test.mjs` — weights, clamping, trust rules, tier boundaries.
 - `test/engine.test.mjs` — end-to-end scenarios against the real workspace.
 - `test/features.test.mjs` — frozen weights, approval tiers, check registry, hash-chained ledger and tamper detection.
-- `test/api.test.mjs` — HTTP integration: approval gates, invariant enforcement, baseline test comparison, trust downgrade, safety flag, export, contest, and path traversal.
+- `test/api.test.mjs` — HTTP integration: approval gates, invariant enforcement, baseline test comparison, trust downgrade, trust-0 repair-only lock and override, safety flag, export, contest, and path traversal.
 
 **Documentation**
 

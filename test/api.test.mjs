@@ -353,6 +353,38 @@ test('the ledger can be exported as CSV and JSON', async () => {
   assert.ok(Array.isArray(json.body.ledger));
 });
 
+test('trust 0 blocks new work; an override is the explicit escape hatch', async () => {
+  await post('/api/reset');
+  // There is no admin endpoint for trust, so a test sets the tier directly.
+  // This mirrors how an operator would recover a persisted state file.
+  const stateFile = path.join(runtime, 'state.json');
+  const raw = JSON.parse(await fs.readFile(stateFile, 'utf8'));
+  raw.trust = 0;
+  raw.incident = null;
+  raw.incidents = [];
+  raw.run = null;
+  raw.runApproval = null;
+  await fs.writeFile(stateFile, JSON.stringify(raw, null, 2));
+
+  const atZero = await get('/api/state');
+  assert.equal(atZero.body.tier.mode, 'repair-only');
+
+  const run = await post('/api/run', { scenarioId: 'safe-success' });
+  assert.equal(run.status, 409, 'plan §8: at trust zero no new task may begin');
+  assert.equal(run.body.code, 'repair-only');
+
+  const override = await post('/api/override', { note: 'I reviewed the incident myself.' });
+  assert.equal(override.body.trust, 1);
+  assert.ok(override.body.ledger.some((e) => e.type === 'trust-overridden'));
+  assert.ok(override.body.trustHistory.some((h) => /override/i.test(h.reason)));
+  assert.equal(override.body.ledgerIntegrity.ok, true);
+
+  const second = await post('/api/override', { note: 'again' });
+  assert.equal(second.status, 409, 'an override cannot be used to inflate ordinary trust');
+  assert.equal(second.body.code, 'override-not-allowed');
+  await post('/api/reset');
+});
+
 test('unknown endpoints and unknown scenarios fail cleanly', async () => {
   const missing = await get('/api/nope');
   assert.equal(missing.status, 404);

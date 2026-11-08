@@ -106,6 +106,15 @@ export async function startRun({
       'Repair-only mode is active. Resolve the open incident by repairing or restoring before starting new work.',
     );
   }
+  if (state.trust <= 0) {
+    // Plan §8: at trust zero the agent may inspect, repair, or roll back, but
+    // may not begin a new task. The user's escape hatches are restore, an
+    // explicit override, and reset -- all of which stay available here.
+    throw conflict(
+      'repair-only',
+      'Trust is 0/10, so the project is in repair-only mode. New tasks are blocked. You can repair an incident, restore a checkpoint, override, or reset.',
+    );
+  }
   if (state.runApproval) {
     throw conflict('approval-pending', 'A task is waiting for your approval. Approve, decline, or cancel it first.');
   }
@@ -247,6 +256,36 @@ export async function decideApproval({ state, decision = 'allow', index = null }
   }
 
   return progressRun(state, task);
+}
+
+/**
+ * User override at trust zero. This is deliberately narrow: it grants exactly
+ * one level, only from zero, and is recorded as an override rather than as
+ * earned trust. It cannot be used to inflate trust on an ordinary task.
+ */
+export function grantOverride({ state, note = '' }) {
+  if (state.trust > 0) {
+    throw conflict('override-not-allowed', 'An override is only available at trust 0/10.');
+  }
+  const from = state.trust;
+  const to = applyTrust(from, +1);
+  state.trust = to;
+  const reason = `User override at trust 0. ${String(note).trim() || 'No reason was given.'} This is a user decision, not earned trust.`;
+  state.trustHistory.unshift({
+    id: nextId('trust'),
+    at: new Date().toISOString(),
+    from,
+    to,
+    reason,
+    taskId: null,
+  });
+  logEvent(state, {
+    type: 'trust-overridden',
+    taskId: null,
+    text: `You overrode the repair-only lock. Trust ${from} → ${to}. ${reason}`,
+    severity: 'warning',
+  });
+  return { from, to, reason };
 }
 
 /** Cancel a pending plan. No edit is applied and no trust change is recorded. */

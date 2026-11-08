@@ -17,6 +17,7 @@ import {
   restore,
   decideApproval,
   cancelRun,
+  grantOverride,
   publicState,
 } from './lib/engine.mjs';
 
@@ -267,6 +268,15 @@ const routes = {
   'POST /api/cancel': async () => {
     const result = await update(async (state) => {
       cancelRun({ state });
+      return publicState(state);
+    });
+    return { status: 200, body: result };
+  },
+
+  'POST /api/override': async (req) => {
+    const body = await readBody(req);
+    const result = await update(async (state) => {
+      grantOverride({ state, note: body.note });
       return publicState(state);
     });
     return { status: 200, body: result };

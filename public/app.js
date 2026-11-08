@@ -134,6 +134,8 @@ async function withBusy(button, work) {
       alertUser('Repair-only mode is active. Repair or restore the open incident before starting new work.');
     } else if (error.code === 'approval-pending') {
       alertUser('A plan is waiting for your approval. Approve, decline, or cancel it first.');
+    } else if (error.code === 'repair-only') {
+      alertUser('Trust is 0 out of 10, so new work is blocked. Repair, restore, override, or reset the project first.');
     } else {
       alertUser(error.message);
     }
@@ -189,6 +191,10 @@ function renderTrust(data) {
     }),
     el('span', { text: data.nextPrivilege.detail }),
   );
+
+  // The override is only offered at trust 0, never as a way to inflate trust.
+  $('override-block').hidden = data.trust > 0;
+  $('override-btn').disabled = data.trust > 0 || state.busy;
 }
 
 function renderProject(data) {
@@ -829,6 +835,15 @@ $('restore-btn').addEventListener('click', async (event) => {
       payload.restore.ok
         ? 'Checkpoint restored and verified by content hash. The workspace matches the snapshot taken before the task.'
         : 'Restore could not be verified, so the workspace state cannot be trusted.',
+    );
+  });
+});
+
+$('override-btn').addEventListener('click', async (event) => {
+  await withBusy(event.currentTarget, async () => {
+    state.data = await api('/api/override', { note: 'Explicit user override from the dashboard.' });
+    announce(
+      `You overrode the repair-only lock. Trust is now ${state.data.trust} out of 10. The override is recorded in the ledger as your decision, not as earned trust.`,
     );
   });
 });

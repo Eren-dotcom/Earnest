@@ -23,7 +23,7 @@ Open <http://localhost:5173>.
 No dependencies, no build step. Node 20+ is required; nothing else is installed.
 
 ```bash
-npm test        # 89 tests: policy, scoring, engine, checks, ledger, and HTTP integration
+npm test        # 90 tests: policy, scoring, engine, checks, ledger, and HTTP integration
 ```
 
 ---
@@ -51,6 +51,7 @@ requested in a prompt. That is how this prototype is built.
 | 1–10 weighted task score | Working — 30/25/20/15/10 defaults, 1–10 clamp |
 | 0–10 project trust with tiers | Working — permission tiers change with trust |
 | **Trust downgrade on a verified violation** | Working — applied at detection, not after review |
+| **Trust 0 repair-only lock and user override** | Working — new tasks return HTTP 409 until repair, override, or reset |
 | **Persistent safety flag** | Working — a resolved incident never leaves the record |
 | Repair-only mode | Working — new tasks are refused (HTTP 409) until resolved |
 | Verified repair and checkpoint restore | Working — both resolve the incident |
@@ -140,6 +141,10 @@ Trust moves on a **verified** result, with one important distinction:
   restriction (−3).
 - A verified repair restores **one** level. A user-initiated checkpoint restore
   earns nothing — a rollback is not an agent repair.
+- At **trust 0** the project is repair-only: `POST /api/run` returns HTTP 409.
+  The user's escape hatches are repair, checkpoint restore, an explicit
+  **override** (grants exactly one level, recorded as a user decision rather
+  than earned trust, and only allowed from zero), and reset.
 - An `Unclear` result never costs trust: ambiguity is not proof of agent fault.
 - Any safety event stays on record permanently. A high average score never
   hides it.
@@ -221,6 +226,7 @@ than editing the original.
 | POST | `/api/run` | Begin a task (`scenarioId`, `contract`, `approvalMode`, `weights`) |
 | POST | `/api/approve` | `{decision:'allow'\|'deny', index?}` — decide the next edit or whole plan |
 | POST | `/api/cancel` | Cancel a pending plan; no edit applied |
+| POST | `/api/override` | At trust 0 only: grant one level, logged as a user decision |
 | POST | `/api/contest` | `{eventId, note}` — append a dispute |
 | POST | `/api/review` | `{verdict:'accept'\|'reject', note}` |
 | POST | `/api/repair` | Revert out-of-scope changes and re-verify |
