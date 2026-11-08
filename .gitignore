@@ -1,0 +1,4 @@
+node_modules/
+.earnest/
+*.log
+.DS_Store

@@ -1,0 +1,15 @@
+{
+  "name": "earnest",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Accessibility-first accountability layer for AI coding agents: verified task scores, project-local trust, enforced permissions, and repair-before-new-work.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/index.mjs",
+    "dev": "node server/index.mjs",
+    "test": "node --test"
+  }
+}

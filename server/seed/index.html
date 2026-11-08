@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Workshop — sample project</title>
+    <link rel="stylesheet" href="./src/site.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      import { renderNavbar } from './src/Navbar.js';
+      import { renderHeroImage } from './src/HeroImage.js';
+
+      document.getElementById('app').innerHTML = `
+        ${renderNavbar({ current: 'home' })}
+        <main id="main">
+          <h1>Workshop</h1>
+          ${renderHeroImage()}
+          <p>Everything we build starts at the same table.</p>
+        </main>
+      `;
+    </script>
+  </body>
+</html>
