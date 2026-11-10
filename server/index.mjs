@@ -9,6 +9,7 @@ import { ensureDir, exists } from './lib/fsutil.mjs';
 import { DEFAULT_CONTRACT, CONTRACT_WARNINGS, approvalModeFor } from './lib/contracts.mjs';
 import { CHECK_TYPES } from './lib/verify.mjs';
 import { defaultWeights } from './lib/scoring.mjs';
+import { createOtariClient, otariStatus } from './lib/otari.mjs';
 import {
   resetWorkspace,
   startRun,
@@ -168,6 +169,22 @@ const routes = {
     };
   },
 
+  'GET /api/otari': async () => {
+    const status = otariStatus(createOtariClient());
+    return {
+      status: 200,
+      body: {
+        ...status,
+        runBudgetUsd: Number(process.env.OTARI_RUN_BUDGET_USD ?? 0.5),
+        userBudgetUsd: process.env.OTARI_USER_BUDGET_USD ? Number(process.env.OTARI_USER_BUDGET_USD) : null,
+        pricesAreEstimates: true,
+        note: status.configured
+          ? 'Live model calls go through the Otari gateway only. Costs shown are estimates until catalog prices are confirmed via GET /v1/models.'
+          : 'Otari: not configured — set OTARI_API_KEY. No live model calls are made.',
+      },
+    };
+  },
+
   'GET /api/ledger/verify': async () => {
     const state = await readState();
     return { status: 200, body: verifyLedger(state) };
@@ -250,6 +267,8 @@ const routes = {
         state,
         approvalMode: resolveApprovalMode(body.approvalMode, state.trust),
         weights: Array.isArray(body.weights) ? body.weights : null,
+        live: body.live === true,
+        userId: typeof body.userId === 'string' && body.userId.trim() ? body.userId.trim() : 'default',
       });
       return publicState(state);
     });
