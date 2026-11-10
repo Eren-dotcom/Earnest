@@ -64,9 +64,11 @@ function otariError(code, message) {
  */
 export function createBudget({ limitUsd = Number(process.env.OTARI_RUN_BUDGET_USD ?? 0.5), perUser = {} } = {}) {
   const spentByUser = new Map();
+  const spentByModel = new Map();
   let spent = 0;
   return {
     limitUsd,
+    perUserCaps: { ...perUser },
     get spentUsd() { return spent; },
     spentFor(userId) { return spentByUser.get(userId) ?? 0; },
     check(userId = 'default', estUsd = 0) {
@@ -78,14 +80,30 @@ export function createBudget({ limitUsd = Number(process.env.OTARI_RUN_BUDGET_US
         throw otariError('user-budget-exceeded', `Otari budget for user "${userId}" exceeded: $${this.spentFor(userId).toFixed(4)} of $${cap} cap.`);
       }
     },
-    charge(userId = 'default', usd = 0) {
+    charge(userId = 'default', usd = 0, model = null) {
       spent += usd;
       spentByUser.set(userId, this.spentFor(userId) + usd);
+      if (model) spentByModel.set(model, (spentByModel.get(model) ?? 0) + usd);
       return spent;
     },
     receipt() {
-      return { limitUsd, spentUsd: spent, remainingUsd: Math.max(0, limitUsd - spent), perUser: Object.fromEntries(spentByUser) };
+      return {
+        limitUsd, spentUsd: spent, remainingUsd: Math.max(0, limitUsd - spent),
+        perUser: Object.fromEntries(spentByUser), perUserCaps: { ...perUser },
+        byModel: Object.fromEntries(spentByModel),
+        pricesAreEstimates: true,
+      };
     },
+  };
+}
+
+export function otariStatus(client) {
+  return {
+    configured: client.isConfigured(),
+    status: client.isConfigured() ? 'configured' : 'not configured',
+    baseUrl: client.baseUrl,
+    gateway: client.baseUrl,
+    roles: Object.fromEntries(Object.entries(ROLES).map(([id, r]) => [id, { label: r.label, models: [...r.models] }])),
   };
 }
 
@@ -127,18 +145,22 @@ export function createOtariClient({
     if (!ordered?.length) throw otariError('otari-no-model', `No Otari models configured for role "${role}".`);
     budget.check(userId, 0);
     const attempts = [];
-    for (const model of ordered) {
+    for (const [i, model] of ordered.entries()) {
       const started = Date.now();
       try {
         const { content, usage } = await tryModel(model, messages);
         const costUsd = estimateCostUsd(model, usage);
         budget.check(userId, costUsd);
-        budget.charge(userId, costUsd);
-        attempts.push({ model, ok: true, ms: Date.now() - started });
+        budget.charge(userId, costUsd, model);
+        attempts.push({ model, role, ok: true, fallback: i > 0, ms: Date.now() - started, usage, costUsd });
         return { content, model, role, usage, costUsd, attempts, receipt: budget.receipt() };
       } catch (err) {
-        if (err.code === 'budget-exceeded' || err.code === 'user-budget-exceeded') throw err;
-        attempts.push({ model, ok: false, ms: Date.now() - started, error: err.message });
+        if (err.code === 'budget-exceeded' || err.code === 'user-budget-exceeded') {
+          err.attempts = attempts;
+          err.receipt = budget.receipt();
+          throw err;
+        }
+        attempts.push({ model, role, ok: false, fallback: i > 0, ms: Date.now() - started, error: err.message, usage: null, costUsd: 0 });
       }
     }
     const err = otariError('otari-all-models-failed', `All Otari models failed for role "${role}": ${attempts.map((a) => a.model).join(', ')}`);
@@ -153,7 +175,7 @@ export function createOtariClient({
     return res.json();
   }
 
-  return { chat, listModels, isConfigured, budget };
+  return { chat, listModels, isConfigured, budget, baseUrl };
 }
 
 export const otari = createOtariClient();
