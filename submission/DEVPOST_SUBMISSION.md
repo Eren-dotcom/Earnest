@@ -83,6 +83,9 @@ Connect Earnest to a real coding agent through a sandboxed adapter, move the iso
 
 ### Try it out
 
+**Live demo: https://earnest-zeta.vercel.app/** — click Reset for a clean run.
+Note: the hosted demo keeps its state per server instance, so it may reset between visits; the full experience (including a persistent ledger) is the local run:
+
 ```bash
 node server/index.mjs   # or: npm start
 ```
@@ -102,7 +105,7 @@ Open http://localhost:5173 — no dependencies to install. Run the "Verified tas
 - [ ] Short pitch: tagline above
 - [ ] Detailed description: section above
 - [ ] Demo video: upload to YouTube, keep under 3 minutes (script in DEMO_VIDEO_SCRIPT.md), paste link
-- [ ] GitHub / project link: TODO — public repo URL
+- [x] GitHub / project link: https://github.com/Eren-dotcom/Earnest · Live demo: https://earnest-zeta.vercel.app/
 - [ ] Built with: Node.js, JavaScript, HTML, CSS
 - [ ] Screenshots: see shot list below (4–5 images)
 - [ ] Submit before 3:30 AM IST, Nov 11
