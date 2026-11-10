@@ -12,8 +12,9 @@ import path from 'node:path';
  */
 
 const runtime = await fs.mkdtemp(path.join(os.tmpdir(), 'earnest-api-'));
-const port = 5300 + Math.floor(Math.random() * 200);
-const base = `http://127.0.0.1:${port}`;
+// PORT 0 lets the OS assign a free port, so concurrent test runs never collide.
+// The server logs its actual port on startup; before() reads it from stdout.
+let base;
 let server;
 
 const get = async (p) => {
@@ -50,21 +51,26 @@ const siteCss = () => fs.readFile(path.join(runtime, 'workspace', 'src', 'site.c
 before(async () => {
   server = spawn('node', ['server/index.mjs'], {
     cwd: path.resolve(import.meta.dirname, '..'),
-    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', EARNEST_RUNTIME: runtime },
-    stdio: 'ignore',
+    env: { ...process.env, PORT: '0', HOST: '127.0.0.1', EARNEST_RUNTIME: runtime },
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
 
-  const deadline = Date.now() + 15000;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(`${base}/api/state`);
-      if (res.ok) return;
-    } catch {
-      /* server not up yet */
-    }
-    await new Promise((r) => setTimeout(r, 150));
-  }
-  throw new Error('server did not start in time');
+  base = await new Promise((resolve, reject) => {
+    const deadline = setTimeout(() => reject(new Error('server did not start in time')), 15000);
+    let out = '';
+    server.stdout.on('data', (chunk) => {
+      out += chunk;
+      const match = out.match(/http:\/\/127\.0\.0\.1:(\d+)/);
+      if (match) {
+        clearTimeout(deadline);
+        resolve(`http://127.0.0.1:${match[1]}`);
+      }
+    });
+    server.once('exit', (code) => {
+      clearTimeout(deadline);
+      reject(new Error(`server exited early with code ${code}`));
+    });
+  });
 });
 
 after(async () => {

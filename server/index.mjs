@@ -22,7 +22,7 @@ import {
 } from './lib/engine.mjs';
 
 const PORT = Number(process.env.PORT ?? 5173);
-const HOST = process.env.HOST ?? '0.0.0.0';
+const HOST = process.env.HOST ?? '127.0.0.1';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -380,7 +380,14 @@ if (!(await exists(WORKSPACE_DIR))) {
   await resetWorkspace();
 }
 
-server.listen(PORT, HOST, () => {
-  console.log(`Earnest is running at http://${HOST}:${PORT}`);
-  console.log(`Workspace: ${path.relative(ROOT, WORKSPACE_DIR)}`);
-});
+// Listen only when run directly (`node server/index.mjs`). On Vercel the
+// handler is exported instead (see api/index.mjs) — serverless has no port.
+import { fileURLToPath } from 'node:url';
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  server.listen(PORT, HOST, () => {
+    console.log(`Earnest is running at http://${HOST}:${server.address().port}`);
+    console.log(`Workspace: ${path.relative(ROOT, WORKSPACE_DIR)}`);
+  });
+}
+
+export default server;

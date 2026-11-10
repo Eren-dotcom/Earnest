@@ -261,9 +261,10 @@ Be honest about what this is:
   the workspace is a directory, not an OS-level container.
 - Trust is local to this project. It is not a portable reputation score and says
   nothing about a model in general.
-- **No authentication or CSRF/origin checking.** The server binds `0.0.0.0` by
-  default and is intended for local use only. Anyone who can reach the port can
-  reset the demo.
+- **No authentication or CSRF/origin checking.** The server binds `127.0.0.1`
+  (localhost) by default and is intended for local use only. Set `HOST=0.0.0.0`
+  only if you deliberately want it reachable from other machines — anyone who
+  can reach the port can reset the demo.
 - The weight editor is API-only; the dashboard displays frozen weights but does
   not let you change them.
 - The archived ledger tail is pruned after 5,000 extra events, which is reported
