@@ -10,6 +10,9 @@ an unresolved mistake before it starts new work.
 This repository contains a working prototype: a real server, a real sandboxed
 workspace, real verifiers, real policy enforcement, and an accessible dashboard.
 
+**Live demo:** https://earnest-zeta.vercel.app/ — click "Reset demo" for a clean
+run. Hosted state is per server instance, so it may reset between visits.
+
 ---
 
 ## Quick start
