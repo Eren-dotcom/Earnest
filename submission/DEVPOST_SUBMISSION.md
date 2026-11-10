@@ -14,10 +14,11 @@ Earnest
 
 Trust is earned. Mistakes must be fixed first. Earnest is an accessibility-first accountability layer for AI coding agents: it verifies every task against your instructions, scores the result in plain language, and makes the agent repair a mistake before it can start anything new.
 
-## Project link (GitHub repository)
+## Project links
 
-TODO — create public repo `Eren-dotcom/earnest` and paste the URL here.
-Until then, the code ships as `earnest-v1.1.0.zip` (see "Try it out" in the description).
+- **Live demo:** https://earnest-zeta.vercel.app/
+- **GitHub repository:** https://github.com/Eren-dotcom/Earnest
+- **Demo video (YouTube):** https://www.youtube.com/watch?v=AVPtOjLKu4w
 
 ## Technologies used ("Built with")
 
@@ -104,7 +105,7 @@ Open http://localhost:5173 — no dependencies to install. Run the "Verified tas
 - [ ] Project name: Earnest
 - [ ] Short pitch: tagline above
 - [ ] Detailed description: section above
-- [ ] Demo video: upload to YouTube, keep under 3 minutes (script in DEMO_VIDEO_SCRIPT.md), paste link
+- [x] Demo video: https://www.youtube.com/watch?v=AVPtOjLKu4w (2:00)
 - [x] GitHub / project link: https://github.com/Eren-dotcom/Earnest · Live demo: https://earnest-zeta.vercel.app/
 - [ ] Built with: Node.js, JavaScript, HTML, CSS
 - [ ] Screenshots: see shot list below (4–5 images)
@@ -118,4 +119,4 @@ Open http://localhost:5173 — no dependencies to install. Run the "Verified tas
 4. `4-repair-resolved.png` — after **Repair and verify**: trust back to 5, safety flag still visible on the record.
 5. Optional `5-ledger.png` — ledger verification result: chain OK.
 
-Note (2026-11-10): screenshots could not be captured from this workspace — the local browser binary is policy-blocked here and the cloud browser cannot reach this machine's localhost. Capture them from a live deployment (best for judges too) or by running the zip locally, following the states above.
+Note (2026-11-10): the 4 screenshots were captured on the live deployment in the browser session (dashboard trust 5 → 9.7 score → violation blocked trust 4 → repair resolved trust 5, flag on record). They were not saved as files; Devpost screenshots are optional, so the submission proceeds without them.
