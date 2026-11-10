@@ -1359,3 +1359,8 @@ textarea {
 .override-block .btn {
   margin-top: 0.5rem;
 }
+
+/* ---------- Otari live panels ---------- */
+.live-toggle input { width: 1.15rem; height: 1.15rem; accent-color: var(--accent); }
+#otari-card dl.contract, #guardrails-card .plain-list { margin-top: .5rem; }
+#otari-budget p, #otari-outputs p { margin: .35rem 0; overflow-wrap: anywhere; }

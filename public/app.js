@@ -471,6 +471,16 @@ function renderTask(data) {
     return;
   }
 
+  if (task.status === 'budget-exceeded' || task.status === 'otari-failed') {
+    statusEl.textContent = task.status === 'budget-exceeded' ? 'Budget exceeded — run aborted' : 'Otari run failed — aborted';
+    scoreEl.textContent = '—';
+    tagEl.textContent = 'Not scored';
+    summaryEl.textContent = task.otari?.error?.message ?? 'The live Otari run was aborted before execution. No edit was scored.';
+    $('review-block').hidden = true;
+    checkList.append(el('li', { class: 'empty', text: 'No checks were run — the run was aborted before execution.' }));
+    return;
+  }
+
   if (task.status === 'cancelled') {
     statusEl.textContent = 'Cancelled';
     scoreEl.textContent = '—';
@@ -600,6 +610,80 @@ function renderDiffs(data) {
   );
 }
 
+function renderOtari(data) {
+  const statusEl = $('otari-status');
+  if (!statusEl) return;
+  const otari = data.otari ?? {};
+  statusEl.textContent = otari.configured
+    ? `Otari: configured — gateway ${otari.baseUrl}. All model calls go through Otari.`
+    : `Otari: not configured — gateway ${otari.baseUrl ?? 'https://api.otari.ai/v1'}. Set OTARI_API_KEY for live models; no live call is faked.`;
+
+  const models = $('otari-models');
+  clear(models);
+  const row = (term, value) => {
+    const wrap = el('div', {}, [el('dt', { text: term }), el('dd', { text: value })]);
+    return wrap;
+  };
+  for (const [id, role] of Object.entries(otari.roles ?? {})) {
+    models.append(row(`${role.label} (${id})`, `${role.models[0]} — fallback: ${role.models.slice(1).join(', ') || 'none'}`));
+  }
+
+  const task = data.latestTask;
+  const live = task?.otari;
+  const attempts = $('otari-attempts');
+  clear(attempts);
+  if (live?.attempts?.length) {
+    for (const a of live.attempts) {
+      attempts.append(el('li', {
+        text: `${a.role}: ${a.model}${a.fallback ? ' (fallback)' : ''} — ${a.ok ? `succeeded in ${a.ms} ms, ${a.usage?.total_tokens ?? ''} tokens, $${(a.costUsd ?? 0).toFixed(4)} estimated` : `failed: ${a.error ?? 'error'}`}`,
+      }));
+    }
+  } else {
+    attempts.append(el('li', { text: live ? 'Otari: not configured for the latest run — no attempts were made.' : 'No live Otari attempts yet.' }));
+  }
+
+  const budget = $('otari-budget');
+  clear(budget);
+  const receipt = live?.receipt ?? task?.otariReceipt;
+  if (receipt) {
+    const lines = [
+      `Total spent: $${receipt.spentUsd.toFixed(4)} of $${receipt.limitUsd} run limit (remaining $${receipt.remainingUsd.toFixed(4)}).`,
+      ...Object.entries(receipt.byModel ?? {}).map(([m, v]) => `Per-model cost — ${m}: $${Number(v).toFixed(4)}`),
+      ...Object.entries(receipt.perUser ?? {}).map(([u, v]) => `Per-user spend — user "${u}": $${Number(v).toFixed(4)}${receipt.perUserCaps?.[u] != null ? ` of $${receipt.perUserCaps[u]} cap` : ''}`),
+      'Prices are estimates until Otari catalog prices are confirmed.',
+    ];
+    for (const line of lines) budget.append(el('p', { text: line }));
+    if (task.status === 'budget-exceeded') budget.append(el('p', { text: 'Budget exceeded: this run was aborted before execution.' }));
+  } else {
+    budget.append(el('p', { text: 'No Otari spend yet. The run budget limit applies per run; costs are estimates until catalog prices are confirmed.' }));
+  }
+
+  const outputs = $('otari-outputs');
+  clear(outputs);
+  if (live?.outputs && Object.keys(live.outputs).length) {
+    for (const [role, out] of Object.entries(live.outputs)) {
+      outputs.append(el('p', {}, [
+        el('strong', { text: `${role} (${out.model}): ` }),
+        document.createTextNode(String(out.content ?? '').slice(0, 400)),
+      ]));
+    }
+  } else {
+    outputs.append(el('p', { text: 'No live model output yet.' }));
+  }
+
+  const g = data.guardrails ?? {};
+  $('guardrails-status').textContent = `Guardrails: ${g.blockCount ?? 0} block(s) recorded. Trust ${g.trust ?? data.trust}/10. ${g.trustZeroLock ? 'Trust-zero repair-only lock: ACTIVE — new tasks are blocked.' : 'Trust-zero repair-only lock: not active.'} ${g.text ?? ''}`;
+  const gList = $('guardrails-list');
+  clear(gList);
+  if (g.blocks?.length) {
+    for (const b of g.blocks.slice(0, 10)) {
+      gList.append(el('li', { text: `${b.type === 'guardrail-block' ? 'Guardrail block' : 'Policy block'}${b.path ? ` — ${b.path}` : ''}${b.code ? ` (${b.code})` : ''}: ${b.text}` }));
+    }
+  } else {
+    gList.append(el('li', { text: 'No guardrail blocks recorded yet.' }));
+  }
+}
+
 function renderLedger(data) {
   const trustList = $('trust-history');
   clear(trustList);
@@ -690,6 +774,7 @@ function render() {
   renderBreakdown(data);
   renderActions(data);
   renderDiffs(data);
+  renderOtari(data);
   renderLedger(data);
 
   if (focusId) {
@@ -740,9 +825,12 @@ $('run-btn').addEventListener('click', async (event) => {
       scenarioId: state.scenario,
       approvalMode: $('approval-mode').value,
       contract: currentContract(),
+      live: Boolean($('live-otari')?.checked),
     });
     state.data = payload;
-    if (payload.approval) {
+    if (payload.latestTask?.status === 'budget-exceeded' || payload.latestTask?.status === 'otari-failed') {
+      announce(`Live Otari run aborted: ${payload.latestTask.otari?.error?.message ?? payload.latestTask.status}. No edit was scored.`);
+    } else if (payload.approval) {
       announce(
         `A plan is waiting for your approval. ${payload.approval.total} action(s) proposed. Nothing has been applied yet.`,
       );
