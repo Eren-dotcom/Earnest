@@ -31,7 +31,7 @@ function logOtariAttempts(state, taskId, attempts) {
       taskId,
       model: a.model, role: a.role, fallback: Boolean(a.fallback),
       usage: a.usage ?? null, costUsd: a.costUsd ?? 0, ms: a.ms ?? null,
-      text: `Otari: ${a.role} ${a.model}${a.fallback ? ' (fallback)' : ''} — ${a.ok ? `ok in ${a.ms} ms, ${a.usage?.total_tokens ?? (a.usage?.prompt_tokens ?? 0) + (a.usage?.completion_tokens ?? 0)} tokens, $${(a.costUsd ?? 0).toFixed(4)} (estimated price)` : `failed: ${a.error}`}`,
+      text: `Otari: ${a.role} ${a.model}${a.fallback ? ' (fallback)' : ''} — ${a.ok ? `ok in ${a.ms} ms, ${a.usage?.total_tokens ?? (a.usage?.prompt_tokens ?? 0) + (a.usage?.completion_tokens ?? 0)} tokens, $${(a.costUsd ?? 0).toFixed(4)} (catalog price)` : `failed: ${a.error}`}`,
       severity: a.ok ? 'success' : 'warning',
     });
   }
@@ -108,7 +108,7 @@ export async function runLiveOtari({ state, task, contract, client, userId = 'de
   base.receipt = client.budget.receipt();
   logEvent(state, {
     type: 'otari-audit-complete', taskId: task.id,
-    text: `Otari: planner ${base.outputs.planner.model} and auditor ${base.outputs.auditor.model} completed via the Otari gateway. ${base.guardrailBlocks.length} guardrail block(s). Total $${base.receipt.spentUsd.toFixed(4)} of $${base.receipt.limitUsd} budget (estimated prices). Deterministic checks still decide the score.`,
+    text: `Otari: planner ${base.outputs.planner.model} and auditor ${base.outputs.auditor.model} completed via the Otari gateway. ${base.guardrailBlocks.length} guardrail block(s). Total $${base.receipt.spentUsd.toFixed(4)} of $${base.receipt.limitUsd} budget (Otari catalog prices). Deterministic checks still decide the score.`,
     severity: 'info',
   });
   return base;

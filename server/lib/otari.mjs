@@ -3,46 +3,44 @@
  *
  * Otari (Mozilla AI) is an OpenAI-compatible hosted gateway:
  *   POST {OTARI_BASE_URL}/chat/completions, Authorization: Bearer <token>
- * Verified from the Otari help-centre quickstart (2026-10-01):
- * base URL https://api.otari.ai/v1, tokens start with `otk_`, example model
- * id `deepseek/deepseek-v4-pro-0813` (provider/model slash form). Other
- * Otari SDK docs show a colon form instead, so model ids below are
- * env-configurable defaults, not verified facts — confirm with listModels()
- * once a real key is available. No direct provider calls anywhere.
+ * Verified live on 2026-11-11 with a real key (Bearer auth): base URL
+ * https://api.otari.ai/api/v1 (the /v1 form in older docs returns 404),
+ * GET /models lists 165 models, and the default model ids + catalog
+ * prices below are the live values from that check. Model ids stay
+ * env-configurable overrides. No direct provider calls anywhere.
  *
  * Zero dependencies: global fetch only, matching the rest of Earnest.
  */
 
-export const DEFAULT_BASE_URL = 'https://api.otari.ai/v1';
+export const DEFAULT_BASE_URL = 'https://api.otari.ai/api/v1';
 
 // Role → ordered model list. First entry is primary, rest are fallbacks.
-// shortcut: default ids follow the quickstart slash convention; upgrade by
-// setting OTARI_MODEL_* once GET /v1/models confirms the real catalog ids.
+// Default ids are the live-verified API ids (2026-11-11); note there is no
+// "qwen3-max" API id — dashboard display names differ from API ids.
 export const ROLES = {
   planner: {
     label: 'Planner / writer',
     models: [
-      process.env.OTARI_MODEL_PLANNER || 'alibaba/qwen3-max',
-      process.env.OTARI_MODEL_FALLBACK || 'meta/llama-4-maverick',
+      process.env.OTARI_MODEL_PLANNER || 'alibaba/qwen3-32b',
+      process.env.OTARI_MODEL_FALLBACK || 'meta/llama-4-maverick-17b-instruct',
     ],
   },
   auditor: {
     label: 'Independent auditor / verifier',
     models: [
       process.env.OTARI_MODEL_AUDITOR || 'deepseek/deepseek-v3.2',
-      process.env.OTARI_MODEL_FALLBACK || 'meta/llama-4-maverick',
+      process.env.OTARI_MODEL_FALLBACK || 'meta/llama-4-maverick-17b-instruct',
     ],
   },
 };
 
-// Best-effort USD per 1M tokens [input, output]; unknown models cost 0 and
-// are flagged so a receipt never silently understates a known model.
-// shortcut: placeholder prices for the budget receipt — replace with the Otari
-// catalog prices once the key gives access to /v1/models pricing.
+// Otari catalog prices, USD per 1M tokens [input, output], verified live
+// 2026-11-11 via GET /models. Unknown models cost 0 in the estimate; when a
+// chat response reports its own cost, that actual figure is preferred.
 const PRICES = {
-  'alibaba/qwen3-max': [1.2, 6.0],
-  'deepseek/deepseek-v3.2': [0.3, 1.2],
-  'meta/llama-4-maverick': [0.2, 0.8],
+  'alibaba/qwen3-32b': [0.08, 0.28],
+  'deepseek/deepseek-v3.2': [0.62, 1.85],
+  'meta/llama-4-maverick-17b-instruct': [0.24, 0.97],
 };
 
 export function estimateCostUsd(model, usage) {
@@ -91,7 +89,8 @@ export function createBudget({ limitUsd = Number(process.env.OTARI_RUN_BUDGET_US
         limitUsd, spentUsd: spent, remainingUsd: Math.max(0, limitUsd - spent),
         perUser: Object.fromEntries(spentByUser), perUserCaps: { ...perUser },
         byModel: Object.fromEntries(spentByModel),
-        pricesAreEstimates: true,
+        pricesAreEstimates: false,
+        priceSource: 'Otari catalog prices (verified 2026-11-11); a call uses the actual cost Otari reports when the response includes one.',
       };
     },
   };
@@ -124,13 +123,15 @@ export function createOtariClient({
         method: 'POST',
         signal: ctrl.signal,
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, messages }),
+        // max_tokens 1024: Qwen3-32b reasons first, so a small cap spends the budget on reasoning and returns empty content.
+        body: JSON.stringify({ model, messages, max_tokens: 1024 }),
       });
       if (!res.ok) throw otariError('otari-http', `Otari ${res.status} for model ${model}`);
       const data = await res.json();
       const content = data?.choices?.[0]?.message?.content ?? '';
       if (!content) throw otariError('otari-empty', `Otari returned no content for model ${model}`);
-      return { content, usage: data.usage ?? null };
+      const usage = data.usage ?? null;
+      return { content, usage, reportedCostUsd: usage?.cost_usd ?? usage?.estimated_cost ?? data.cost_usd ?? null };
     } finally {
       clearTimeout(timer);
     }
@@ -148,11 +149,11 @@ export function createOtariClient({
     for (const [i, model] of ordered.entries()) {
       const started = Date.now();
       try {
-        const { content, usage } = await tryModel(model, messages);
-        const costUsd = estimateCostUsd(model, usage);
+        const { content, usage, reportedCostUsd } = await tryModel(model, messages);
+        const costUsd = reportedCostUsd ?? estimateCostUsd(model, usage);
         budget.check(userId, costUsd);
         budget.charge(userId, costUsd, model);
-        attempts.push({ model, role, ok: true, fallback: i > 0, ms: Date.now() - started, usage, costUsd });
+        attempts.push({ model, role, ok: true, fallback: i > 0, ms: Date.now() - started, usage, costUsd, costSource: reportedCostUsd != null ? 'otari-reported' : 'catalog' });
         return { content, model, role, usage, costUsd, attempts, receipt: budget.receipt() };
       } catch (err) {
         if (err.code === 'budget-exceeded' || err.code === 'user-budget-exceeded') {

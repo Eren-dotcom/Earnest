@@ -616,7 +616,7 @@ function renderOtari(data) {
   const otari = data.otari ?? {};
   statusEl.textContent = otari.configured
     ? `Otari: configured — gateway ${otari.baseUrl}. All model calls go through Otari.`
-    : `Otari: not configured — gateway ${otari.baseUrl ?? 'https://api.otari.ai/v1'}. Set OTARI_API_KEY for live models; no live call is faked.`;
+    : `Otari: not configured — gateway ${otari.baseUrl ?? 'https://api.otari.ai/api/v1'}. Set OTARI_API_KEY for live models; no live call is faked.`;
 
   const models = $('otari-models');
   clear(models);
@@ -635,7 +635,7 @@ function renderOtari(data) {
   if (live?.attempts?.length) {
     for (const a of live.attempts) {
       attempts.append(el('li', {
-        text: `${a.role}: ${a.model}${a.fallback ? ' (fallback)' : ''} — ${a.ok ? `succeeded in ${a.ms} ms, ${a.usage?.total_tokens ?? ''} tokens, $${(a.costUsd ?? 0).toFixed(4)} estimated` : `failed: ${a.error ?? 'error'}`}`,
+        text: `${a.role}: ${a.model}${a.fallback ? ' (fallback)' : ''} — ${a.ok ? `succeeded in ${a.ms} ms, ${a.usage?.total_tokens ?? ''} tokens, $${(a.costUsd ?? 0).toFixed(4)} at Otari catalog price` : `failed: ${a.error ?? 'error'}`}`,
       }));
     }
   } else {
@@ -650,12 +650,12 @@ function renderOtari(data) {
       `Total spent: $${receipt.spentUsd.toFixed(4)} of $${receipt.limitUsd} run limit (remaining $${receipt.remainingUsd.toFixed(4)}).`,
       ...Object.entries(receipt.byModel ?? {}).map(([m, v]) => `Per-model cost — ${m}: $${Number(v).toFixed(4)}`),
       ...Object.entries(receipt.perUser ?? {}).map(([u, v]) => `Per-user spend — user "${u}": $${Number(v).toFixed(4)}${receipt.perUserCaps?.[u] != null ? ` of $${receipt.perUserCaps[u]} cap` : ''}`),
-      'Prices are estimates until Otari catalog prices are confirmed.',
+      'Costs use Otari catalog prices (verified 2026-11-11); when Otari reports a call\'s actual cost, that figure is used instead.',
     ];
     for (const line of lines) budget.append(el('p', { text: line }));
     if (task.status === 'budget-exceeded') budget.append(el('p', { text: 'Budget exceeded: this run was aborted before execution.' }));
   } else {
-    budget.append(el('p', { text: 'No Otari spend yet. The run budget limit applies per run; costs are estimates until catalog prices are confirmed.' }));
+    budget.append(el('p', { text: 'No Otari spend yet. The run budget limit applies per run; costs are calculated at Otari catalog prices.' }));
   }
 
   const outputs = $('otari-outputs');

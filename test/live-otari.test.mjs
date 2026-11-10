@@ -60,7 +60,7 @@ test('live path: planner + auditor via Otari, deterministic checks still decide'
   assert.equal(task.checks.goal.status, 'pass');
   assert.equal(task.checks.tests.status, 'pass');
   assert.ok(task.otariReceipt.spentUsd > 0);
-  assert.ok(task.otariReceipt.byModel['alibaba/qwen3-max'] > 0);
+  assert.ok(task.otariReceipt.byModel['alibaba/qwen3-32b'] > 0);
   assert.ok(task.otariReceipt.byModel['deepseek/deepseek-v3.2'] > 0);
   const hero = await fs.readFile(path.join(WORKSPACE_DIR, 'src/HeroImage.js'), 'utf8');
   assert.match(hero, /alt="A wooden workshop table/);
@@ -75,7 +75,7 @@ test('live path: planner failure falls back to the next model and is logged', as
   });
   const { task } = await startRun({ scenarioId: 'safe-success', contract: DEFAULT_CONTRACT, state, live: true, otariClient: client });
 
-  assert.equal(task.otari.outputs.planner.model, 'meta/llama-4-maverick');
+  assert.equal(task.otari.outputs.planner.model, 'meta/llama-4-maverick-17b-instruct');
   const plannerAttempts = task.otari.attempts.filter((a) => a.role === 'planner');
   assert.equal(plannerAttempts.length, 2);
   assert.equal(plannerAttempts[0].ok, false);

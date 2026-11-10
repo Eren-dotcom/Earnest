@@ -177,9 +177,9 @@ const routes = {
         ...status,
         runBudgetUsd: Number(process.env.OTARI_RUN_BUDGET_USD ?? 0.5),
         userBudgetUsd: process.env.OTARI_USER_BUDGET_USD ? Number(process.env.OTARI_USER_BUDGET_USD) : null,
-        pricesAreEstimates: true,
+        pricesAreEstimates: false,
         note: status.configured
-          ? 'Live model calls go through the Otari gateway only. Costs shown are estimates until catalog prices are confirmed via GET /v1/models.'
+          ? 'Live model calls go through the Otari gateway only. Costs use the Otari catalog prices for the configured models (verified 2026-11-11), or the actual cost Otari reports for a call when the response includes one.'
           : 'Otari: not configured — set OTARI_API_KEY. No live model calls are made.',
       },
     };

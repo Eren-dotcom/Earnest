@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createOtariClient, createBudget, estimateCostUsd } from '../server/lib/otari.mjs';
+import { createOtariClient, createBudget, estimateCostUsd, DEFAULT_BASE_URL, ROLES } from '../server/lib/otari.mjs';
 
 const okRes = (content, usage = { prompt_tokens: 1000, completion_tokens: 1000 }) => ({
   ok: true, status: 200, json: async () => ({ choices: [{ message: { content } }], usage }),
@@ -41,14 +41,35 @@ test('routing: all models failing throws with attempts attached', async () => {
   );
 });
 
+test('defaults match the live-verified gateway, model ids and catalog prices', () => {
+  assert.equal(DEFAULT_BASE_URL, 'https://api.otari.ai/api/v1');
+  assert.deepEqual(ROLES.planner.models, ['alibaba/qwen3-32b', 'meta/llama-4-maverick-17b-instruct']);
+  assert.deepEqual(ROLES.auditor.models, ['deepseek/deepseek-v3.2', 'meta/llama-4-maverick-17b-instruct']);
+  // catalog prices per 1M tokens: qwen 0.08/0.28, deepseek 0.62/1.85, llama 0.24/0.97
+  assert.ok(Math.abs(estimateCostUsd('alibaba/qwen3-32b', { prompt_tokens: 1e6, completion_tokens: 1e6 }) - 0.36) < 1e-9);
+  assert.ok(Math.abs(estimateCostUsd('meta/llama-4-maverick-17b-instruct', { prompt_tokens: 1e6, completion_tokens: 1e6 }) - 1.21) < 1e-9);
+});
+
+test('reported cost wins over the catalog estimate, and max_tokens is at least 1024', async () => {
+  let body;
+  const client = createOtariClient({
+    apiKey: 'otk_test',
+    fetchImpl: async (url, opts) => { body = JSON.parse(opts.body); return okRes('ok', { prompt_tokens: 1000, completion_tokens: 1000, cost_usd: 0.000009 }); },
+  });
+  const out = await client.chat({ messages: [], models: ['deepseek/deepseek-v3.2'] });
+  assert.equal(out.costUsd, 0.000009);
+  assert.equal(out.attempts[0].costSource, 'otari-reported');
+  assert.ok(body.max_tokens >= 1024);
+});
+
 test('budget: cost is captured, charged, and the limit aborts the next run', async () => {
-  // deepseek default price: (1000*0.3 + 1000*1.2)/1e6 = $0.0015 per call
-  assert.ok(Math.abs(estimateCostUsd('deepseek/deepseek-v3.2', { prompt_tokens: 1000, completion_tokens: 1000 }) - 0.0015) < 1e-9);
-  const budget = createBudget({ limitUsd: 0.002 });
+  // deepseek catalog price: (1000*0.62 + 1000*1.85)/1e6 = $0.00247 per call
+  assert.ok(Math.abs(estimateCostUsd('deepseek/deepseek-v3.2', { prompt_tokens: 1000, completion_tokens: 1000 }) - 0.00247) < 1e-9);
+  const budget = createBudget({ limitUsd: 0.003 });
   const client = createOtariClient({ apiKey: 'otk_test', budget, fetchImpl: async () => okRes('ok') });
   const out = await client.chat({ messages: [], models: ['deepseek/deepseek-v3.2'] });
-  assert.equal(out.costUsd, 0.0015);
-  assert.equal(budget.receipt().spentUsd, 0.0015);
+  assert.equal(out.costUsd, 0.00247);
+  assert.equal(budget.receipt().spentUsd, 0.00247);
   await assert.rejects(
     () => client.chat({ messages: [], models: ['deepseek/deepseek-v3.2'] }),
     (e) => e.code === 'budget-exceeded' || e.code === 'user-budget-exceeded',
