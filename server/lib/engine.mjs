@@ -31,7 +31,7 @@ function logOtariAttempts(state, taskId, attempts) {
       taskId,
       model: a.model, role: a.role, fallback: Boolean(a.fallback),
       usage: a.usage ?? null, costUsd: a.costUsd ?? 0, ms: a.ms ?? null,
-      text: `Otari: ${a.role} ${a.model}${a.fallback ? ' (fallback)' : ''} — ${a.ok ? `ok in ${a.ms} ms, ${a.usage?.total_tokens ?? (a.usage?.prompt_tokens ?? 0) + (a.usage?.completion_tokens ?? 0)} tokens, $${(a.costUsd ?? 0).toFixed(4)} (catalog price)` : `failed: ${a.error}`}`,
+      text: `Otari: ${a.role} ${a.model}${a.fallback ? ' (fallback)' : ''} — ${a.ok ? `ok in ${a.ms} ms, ${a.usage?.total_tokens ?? (a.usage?.prompt_tokens ?? 0) + (a.usage?.completion_tokens ?? 0)} tokens, $${(a.costUsd ?? 0).toFixed(4)} (${a.costSource === 'otari-reported' ? 'Otari-reported price' : 'catalog price'})` : `failed: ${a.error}`}`,
       severity: a.ok ? 'success' : 'warning',
     });
   }

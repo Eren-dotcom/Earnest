@@ -6,9 +6,10 @@
   color-scheme: light;
   --ink: #16161a;
   --ink-soft: #4b4b56;
-  --ink-faint: #6d6d7a;
+  --ink-faint: #63636f;
   --paper: #fbfaf7;
   --card: #ffffff;
+  --surface-muted: #f6f4ef;
   --line: #ded9cf;
   --line-soft: #eeeae2;
   --accent: #1f4f7a;
@@ -46,6 +47,13 @@ body {
   line-height: 1.6;
   color: var(--ink);
   background: var(--paper);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  line-height: 1.3;
 }
 
 /* Visible focus for every interactive element, keyboard-first. */
@@ -240,7 +248,7 @@ summary:focus-visible,
 
 .column {
   display: grid;
-  gap: 1rem;
+  gap: 1.25rem;
   min-width: 0;
 }
 
@@ -257,9 +265,17 @@ summary:focus-visible,
   font-size: 1rem;
 }
 
-.card:first-of-type > .subheading:first-child,
 .card > .subheading:first-child {
   margin-top: 0;
+}
+
+/* Fourth-level subheads inside a card read as quiet labels, not headings,
+   so card sections (Otari routing, budget, outputs) scan in hierarchy. */
+.card h4.subheading {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
 }
 
 /* ---------- cards ---------- */
@@ -274,7 +290,7 @@ summary:focus-visible,
 }
 
 .card--muted {
-  background: #f6f4ef;
+  background: var(--surface-muted);
   box-shadow: none;
 }
 
@@ -1185,17 +1201,17 @@ textarea {
 .safety-flag {
   margin: 0.75rem 0 0;
   padding: 0.6rem 0.75rem;
-  border: 1px solid var(--border, #d9d3c7);
-  border-left: 4px solid var(--warning, #a35b00);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--warn);
   border-radius: 0.4rem;
   font-size: 0.85rem;
   line-height: 1.45;
-  background: var(--surface-muted, #f5f1e8);
+  background: var(--surface-muted);
 }
 
 .safety-flag[data-active="false"] {
-  border-left-color: var(--success, #2c6b3f);
-  color: var(--ink-soft, #4a4a52);
+  border-left-color: var(--ok);
+  color: var(--ink-soft);
 }
 
 .field--inline {
@@ -1213,9 +1229,9 @@ textarea {
 .field--inline select {
   max-width: 20rem;
   padding: 0.4rem 0.5rem;
-  border: 1px solid var(--border, #d9d3c7);
+  border: 1px solid var(--line);
   border-radius: 0.35rem;
-  background: var(--surface, #fff);
+  background: var(--card);
   color: inherit;
   font: inherit;
 }
@@ -1235,11 +1251,11 @@ textarea {
 
 .invariant-toggle small {
   display: block;
-  color: var(--ink-soft, #4a4a52);
+  color: var(--ink-soft);
 }
 
 .approval-panel {
-  border-left: 4px solid var(--accent-strong, #1e4f7a);
+  border-left: 4px solid var(--accent-strong);
 }
 
 .approval-plan {
@@ -1252,22 +1268,22 @@ textarea {
 
 .approval-plan li {
   padding: 0.6rem 0.75rem;
-  border: 1px solid var(--border, #d9d3c7);
+  border: 1px solid var(--line);
   border-radius: 0.4rem;
   font-size: 0.85rem;
 }
 
 .approval-plan li[data-current="true"] {
-  border-color: var(--accent-strong, #1e4f7a);
-  background: var(--surface-muted, #f5f1e8);
+  border-color: var(--accent-strong);
+  background: var(--surface-muted);
 }
 
 .approval-plan li[data-decision="allow"] {
-  border-left: 4px solid var(--success, #2c6b3f);
+  border-left: 4px solid var(--ok);
 }
 
 .approval-plan li[data-decision="deny"] {
-  border-left: 4px solid var(--warning, #a35b00);
+  border-left: 4px solid var(--warn);
 }
 
 .approval-plan__head {
@@ -1288,7 +1304,7 @@ textarea {
   overflow-x: auto;
   font-size: 0.78rem;
   line-height: 1.4;
-  background: var(--surface-muted, #f5f1e8);
+  background: var(--surface-muted);
   border-radius: 0.3rem;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1303,7 +1319,7 @@ textarea {
 .weights-note {
   margin: 0 0 0.75rem;
   font-size: 0.82rem;
-  color: var(--ink-soft, #4a4a52);
+  color: var(--ink-soft);
 }
 
 .export-links {
@@ -1314,22 +1330,22 @@ textarea {
 }
 
 .export-links a {
-  color: var(--accent-strong, #1e4f7a);
+  color: var(--accent-strong);
   font-weight: 600;
 }
 
 .contest-form {
   margin-top: 1rem;
   padding-top: 0.75rem;
-  border-top: 1px solid var(--border, #d9d3c7);
+  border-top: 1px solid var(--line);
 }
 
 .contest-form select {
   width: 100%;
   padding: 0.4rem 0.5rem;
-  border: 1px solid var(--border, #d9d3c7);
+  border: 1px solid var(--line);
   border-radius: 0.35rem;
-  background: var(--surface, #fff);
+  background: var(--card);
   color: inherit;
   font: inherit;
 }
@@ -1353,7 +1369,7 @@ textarea {
 .override-block {
   margin-top: 0.85rem;
   padding-top: 0.75rem;
-  border-top: 1px solid var(--border, #d9d3c7);
+  border-top: 1px solid var(--line);
 }
 
 .override-block .btn {
@@ -1364,3 +1380,15 @@ textarea {
 .live-toggle input { width: 1.15rem; height: 1.15rem; accent-color: var(--accent); }
 #otari-card dl.contract, #guardrails-card .plain-list { margin-top: .5rem; }
 #otari-budget p, #otari-outputs p { margin: .35rem 0; overflow-wrap: anywhere; }
+
+/* The Otari and Guardrails cards carry the live-gateway story of the demo:
+   an accent top rule lifts them out of the ledger column's card stack. */
+#otari-card,
+#guardrails-card {
+  border-top: 3px solid var(--accent);
+}
+
+#otari-attempts,
+#otari-budget {
+  font-variant-numeric: tabular-nums;
+}
