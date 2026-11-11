@@ -146,6 +146,10 @@
                 <option value="per-edit">Approve each individual edit</option>
               </select>
             </label>
+            <label class="field field--inline live-toggle">
+              <input type="checkbox" id="live-otari" />
+              <span class="field__label">Live Otari models — planner (Qwen) + independent auditor (DeepSeek) via the Otari gateway. Deterministic checks still decide the score.</span>
+            </label>
             <button type="button" class="btn btn--primary" id="run-btn">Run verified task</button>
             <p class="run-hint" id="run-hint">
               Earnest enforces the contract at the filesystem boundary, then
@@ -273,6 +277,32 @@
       <section class="column" aria-labelledby="ledger-heading">
         <h2 id="ledger-heading" class="section-heading">Activity ledger</h2>
 
+        <div class="card" id="otari-card">
+          <h3 class="subheading">Otari gateway</h3>
+          <p class="card__body small" id="otari-status">Otari: checking configuration…</p>
+          <dl class="contract" id="otari-models"></dl>
+          <h4 class="subheading">Routing and fallback attempts</h4>
+          <ol class="plain-list small" id="otari-attempts">
+            <li>No live Otari attempts yet.</li>
+          </ol>
+          <h4 class="subheading">Budget receipt</h4>
+          <div class="small" id="otari-budget">
+            <p>No Otari spend yet. Run budget limit applies per run; costs are calculated at Otari catalog prices.</p>
+          </div>
+          <h4 class="subheading">Planner and auditor output</h4>
+          <div class="small" id="otari-outputs">
+            <p>No live model output yet.</p>
+          </div>
+        </div>
+
+        <div class="card" id="guardrails-card">
+          <h3 class="subheading">Guardrails</h3>
+          <p class="card__body small" id="guardrails-status">Checking guardrails…</p>
+          <ol class="plain-list small" id="guardrails-list">
+            <li>No guardrail blocks recorded yet.</li>
+          </ol>
+        </div>
+
         <div class="card">
           <h3 class="subheading">Trust changes</h3>
           <ol class="ledger-list" id="trust-history">
@@ -320,7 +350,8 @@
         <div class="card card--muted">
           <h3 class="subheading">What this demo is</h3>
           <ul class="plain-list small">
-            <li>Agent actions are scripted, not a live model.</li>
+            <li>Agent actions are scripted by default; tick “Live Otari models” to add a live planner + auditor through the Otari gateway.</li>
+            <li>All live model calls go through Otari only — never directly to a provider.</li>
             <li>Permissions are enforced in code, then gated by your trust tier.</li>
             <li>Invariants and scoring weights are frozen before a task runs.</li>
             <li>Every event is hash-chained. Disputes append; nothing is edited.</li>

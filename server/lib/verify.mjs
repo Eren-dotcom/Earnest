@@ -409,7 +409,7 @@ export async function verifyProjectChecks(contract, baselineTests = null) {
 
   return check({
     id: 'tests',
-    label: 'Project tests',
+    label: 'Project tests — code execution',
     dimension: 'testsAndChecks',
     status,
     summary,

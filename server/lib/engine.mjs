@@ -15,6 +15,104 @@ import {
   normalizeWeights,
 } from './scoring.mjs';
 import { logEvent, nextId, verifyLedger } from './store.mjs';
+import { createOtariClient, createBudget, otariStatus } from './otari.mjs';
+import { authorize } from './policy.mjs';
+
+/* ---------------- Otari live path (additive; scripted runs unchanged) ---------------- */
+
+function proposedPaths(text) {
+  return [...new Set(String(text ?? '').match(/(?:src|tests)\/[A-Za-z0-9_.\/-]+|index\.html/g) ?? [])];
+}
+
+function logOtariAttempts(state, taskId, attempts) {
+  for (const a of attempts ?? []) {
+    logEvent(state, {
+      type: 'otari-attempt',
+      taskId,
+      model: a.model, role: a.role, fallback: Boolean(a.fallback),
+      usage: a.usage ?? null, costUsd: a.costUsd ?? 0, ms: a.ms ?? null,
+      text: `Otari: ${a.role} ${a.model}${a.fallback ? ' (fallback)' : ''} — ${a.ok ? `ok in ${a.ms} ms, ${a.usage?.total_tokens ?? (a.usage?.prompt_tokens ?? 0) + (a.usage?.completion_tokens ?? 0)} tokens, $${(a.costUsd ?? 0).toFixed(4)} (catalog price)` : `failed: ${a.error}`}`,
+      severity: a.ok ? 'success' : 'warning',
+    });
+  }
+}
+
+/**
+ * Planner proposes, auditor independently audits — both only via Otari.
+ * Model output proposing a write outside the frozen contract is refused
+ * before execution (guardrail-block) using the existing policy authorizer.
+ * Deterministic checks still decide the score; models never override them.
+ */
+export async function runLiveOtari({ state, task, contract, client, userId = 'default' }) {
+  const base = { ...otariStatus(client), attempts: [], outputs: {}, guardrailBlocks: [], receipt: client.budget.receipt() };
+  task.otari = base;
+  if (!client.isConfigured()) {
+    logEvent(state, {
+      type: 'otari-not-configured', taskId: task.id,
+      text: 'Otari: not configured — set OTARI_API_KEY to enable live models. No live model call was made; the deterministic scenario runs unchanged.',
+      severity: 'warning',
+    });
+    return base;
+  }
+  const guardrailCheck = (role, content) => {
+    for (const p of proposedPaths(content)) {
+      const verdict = authorize({ type: 'write', path: p }, contract);
+      if (verdict.decision === 'deny') {
+        const block = { role, path: p, code: verdict.code, reason: verdict.reason };
+        base.guardrailBlocks.push(block);
+        logEvent(state, {
+          type: 'guardrail-block', taskId: task.id, path: p, code: verdict.code,
+          text: `Guardrail block: ${role} model proposed writing ${p}, refused before execution. ${verdict.reason}`,
+          severity: verdict.code === 'out-of-scope' ? 'warning' : 'critical',
+        });
+      }
+    }
+  };
+  try {
+    const planner = await client.chat({
+      role: 'planner', userId,
+      messages: [
+        { role: 'system', content: 'You are the planner for a coding task. Propose a short plan naming the files you would write. Stay inside the frozen contract scope.' },
+        { role: 'user', content: `Goal: ${contract.goal}\nApproved files: ${(contract.allowedPaths ?? []).join(', ')}\nPropose the plan.` },
+      ],
+    });
+    base.attempts.push(...planner.attempts);
+    logOtariAttempts(state, task.id, planner.attempts);
+    base.outputs.planner = { model: planner.model, content: planner.content, usage: planner.usage, costUsd: planner.costUsd };
+    guardrailCheck('planner', planner.content);
+
+    const auditor = await client.chat({
+      role: 'auditor', userId,
+      messages: [
+        { role: 'system', content: 'You are an independent auditor from a different model family. Audit the plan against the frozen contract. Name any file outside the approved scope.' },
+        { role: 'user', content: `Goal: ${contract.goal}\nApproved files: ${(contract.allowedPaths ?? []).join(', ')}\nPlanner (${planner.model}) proposed:\n${planner.content}\nAudit it.` },
+      ],
+    });
+    base.attempts.push(...auditor.attempts);
+    logOtariAttempts(state, task.id, auditor.attempts);
+    base.outputs.auditor = { model: auditor.model, content: auditor.content, usage: auditor.usage, costUsd: auditor.costUsd };
+    guardrailCheck('auditor', auditor.content);
+  } catch (err) {
+    if (err.attempts?.length) { base.attempts.push(...err.attempts); logOtariAttempts(state, task.id, err.attempts); }
+    base.receipt = err.receipt ?? client.budget.receipt();
+    base.error = { code: err.code ?? 'otari-failed', message: err.message };
+    const isBudget = err.code === 'budget-exceeded' || err.code === 'user-budget-exceeded';
+    task.status = isBudget ? 'budget-exceeded' : 'otari-failed';
+    logEvent(state, {
+      type: isBudget ? 'otari-budget-exceeded' : 'otari-failed', taskId: task.id,
+      text: isBudget ? `Budget exceeded — run aborted before execution. ${err.message}` : `Otari live run aborted: ${err.message}`,
+      severity: 'critical',
+    });
+    return { ...base, aborted: true };
+  }
+  base.receipt = client.budget.receipt();
+  logEvent(state, {
+    type: 'otari-audit-complete', taskId: task.id,
+    text: `Otari: planner ${base.outputs.planner.model} and auditor ${base.outputs.auditor.model} completed via the Otari gateway. ${base.guardrailBlocks.length} guardrail block(s). Total $${base.receipt.spentUsd.toFixed(4)} of $${base.receipt.limitUsd} budget (Otari catalog prices). Deterministic checks still decide the score.`,
+    severity: 'info',
+  });
+  return base;
+}
 
 /** Fresh disposable workspace + checkpoint from the pristine seed. */
 export async function resetWorkspace() {
@@ -96,6 +194,9 @@ export async function startRun({
   state,
   approvalMode = 'auto',
   weights = null,
+  live = false,
+  userId = 'default',
+  otariClient = null,
 }) {
   const scenario = SCENARIOS[scenarioId];
   if (!scenario) throw new Error(`Unknown scenario "${scenarioId}"`);
@@ -198,6 +299,21 @@ export async function startRun({
       : `Pre-task test baseline recorded: ${baselineTests.failing.length} test(s) already failing before any edit.`,
     severity: baselineTests.ok ? 'info' : 'warning',
   });
+
+  if (live) {
+    task.live = true;
+    const perUser = process.env.OTARI_USER_BUDGET_USD ? { [userId]: Number(process.env.OTARI_USER_BUDGET_USD) } : {};
+    const client = otariClient ?? createOtariClient({ budget: createBudget({ perUser }) });
+    const liveResult = await runLiveOtari({ state, task, contract: frozenContract, client, userId });
+    task.otari = liveResult;
+    task.otariReceipt = liveResult.receipt ?? null;
+    if (liveResult.aborted) {
+      state.run = { taskId, scenarioId, status: task.status, startedAt: task.startedAt };
+      state.runApproval = null;
+      state.runPlan = null;
+      return { task, aborted: true, budgetExceeded: task.status === 'budget-exceeded' };
+    }
+  }
 
   if (approvalMode === 'auto') {
     const results = await executePlan(plan, frozenContract, state, taskId);
@@ -387,6 +503,19 @@ async function finalizeRun(state, task, baseline) {
   });
 
   task.checks = checks;
+  task.codeExecution = {
+    label: 'Code execution',
+    command: task.contract.projectTestCommand ?? 'node --test',
+    status: checks.tests.status,
+    summary: checks.tests.summary,
+    detail: checks.tests.detail ?? [],
+  };
+  logEvent(state, {
+    type: 'code-execution',
+    taskId: task.id,
+    text: `Code execution (verification): ran the project test suite \`${task.codeExecution.command}\` — ${checks.tests.summary}`,
+    severity: checks.tests.status === 'fail' ? 'warning' : 'info',
+  });
   task.diff = await diffPreview(baseline);
 
   const incidentLedger = state.ledger.filter((e) => e.taskId === task.id);
@@ -720,6 +849,7 @@ export async function restore({ state, checkpointId, taskId }) {
 
 export function publicState(state) {
   const task = state.tasks[0] ?? null;
+  const guardrailBlocks = (state.ledger ?? []).filter((e) => e.type === 'guardrail-block' || e.type === 'action-blocked');
   const active = state.tasks.find((t) => t.status === 'awaiting-review') ?? null;
   const incidents = state.incidents ?? [];
   return {
@@ -756,6 +886,17 @@ export function publicState(state) {
           total: state.runApproval.planPreview.filter((p) => p.requiresApproval).length,
         }
       : null,
+    otari: otariStatus(createOtariClient()),
+    guardrails: {
+      blocks: guardrailBlocks.slice(0, 40).map((e) => ({ id: e.id, at: e.at, type: e.type, path: e.path ?? null, code: e.code ?? null, text: e.text })),
+      blockCount: guardrailBlocks.length,
+      trust: state.trust,
+      repairOnly: Boolean(state.incident && state.incident.status !== 'resolved') || state.trust <= 0,
+      trustZeroLock: state.trust <= 0,
+      text: state.trust <= 0
+        ? 'Trust is 0/10: the repair-only lock is active and new tasks are blocked (POST /api/run returns 409).'
+        : 'Policy blocks out-of-scope and protected-path writes before they reach disk.',
+    },
     ledger: state.ledger.slice(0, 120),
     ledgerIntegrity: verifyLedger(state),
     ledgerHead: state.ledgerHead ?? null,
