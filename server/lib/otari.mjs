@@ -131,7 +131,11 @@ export function createOtariClient({
       const content = data?.choices?.[0]?.message?.content ?? '';
       if (!content) throw otariError('otari-empty', `Otari returned no content for model ${model}`);
       const usage = data.usage ?? null;
-      return { content, usage, reportedCostUsd: usage?.cost_usd ?? usage?.estimated_cost ?? data.cost_usd ?? null };
+      // The gateway reports cost as a string ("0.000109"): normalize to a number here,
+      // the single producer, so budget sums and .toFixed in consumers never see a string.
+      const rawCost = usage?.cost_usd ?? usage?.estimated_cost ?? data.cost_usd ?? null;
+      const reported = rawCost == null ? NaN : Number(rawCost);
+      return { content, usage, reportedCostUsd: Number.isFinite(reported) ? reported : null };
     } finally {
       clearTimeout(timer);
     }

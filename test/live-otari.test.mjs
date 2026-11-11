@@ -66,6 +66,23 @@ test('live path: planner + auditor via Otari, deterministic checks still decide'
   assert.match(hero, /alt="A wooden workshop table/);
 });
 
+test('regression: gateway returns cost_usd as a string, run still completes with a numeric receipt', async () => {
+  const state = await freshState();
+  // The real gateway sends usage.cost_usd as a string, e.g. "0.000109".
+  const stringCost = (content) => okRes(content, { prompt_tokens: 1000, completion_tokens: 500, total_tokens: 1500, cost_usd: '0.000109' });
+  const client = stubClient(byModel(stringCost(PLANNER), stringCost(AUDITOR)));
+  const { task } = await startRun({ scenarioId: 'safe-success', contract: DEFAULT_CONTRACT, state, live: true, otariClient: client });
+
+  assert.equal(task.otari.attempts.length, 2, 'planner and auditor both ran');
+  assert.ok(task.otari.attempts.every((a) => a.ok && typeof a.costUsd === 'number' && a.costSource === 'otari-reported'));
+  assert.ok(state.ledger.some((e) => e.type === 'otari-audit-complete'), 'run reached the auditor');
+  assert.equal(typeof task.otariReceipt.spentUsd, 'number');
+  assert.ok(Math.abs(task.otariReceipt.spentUsd - 0.000218) < 1e-9, 'two reported string costs summed as numbers, not concatenated');
+  const auditLine = state.ledger.find((e) => e.type === 'otari-audit-complete');
+  assert.match(auditLine.text, /Total \$0\.0002 of \$0\.5 budget/, 'receipt total formats with toFixed');
+  assert.equal(task.checks.goal.status, 'pass');
+});
+
 test('live path: planner failure falls back to the next model and is logged', async () => {
   const state = await freshState();
   const client = stubClient((model) => {
