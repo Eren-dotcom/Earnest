@@ -635,7 +635,7 @@ function renderOtari(data) {
   if (live?.attempts?.length) {
     for (const a of live.attempts) {
       attempts.append(el('li', {
-        text: `${a.role}: ${a.model}${a.fallback ? ' (fallback)' : ''} — ${a.ok ? `succeeded in ${a.ms} ms, ${a.usage?.total_tokens ?? ''} tokens, $${(a.costUsd ?? 0).toFixed(4)} at Otari catalog price` : `failed: ${a.error ?? 'error'}`}`,
+        text: `${a.role}: ${a.model}${a.fallback ? ' (fallback)' : ''} — ${a.ok ? `succeeded in ${a.ms} ms, ${a.usage?.total_tokens ?? ''} tokens, $${(a.costUsd ?? 0).toFixed(4)} at ${a.costSource === 'otari-reported' ? 'Otari-reported' : 'Otari catalog'} price` : `failed: ${a.error ?? 'error'}`}`,
       }));
     }
   } else {
